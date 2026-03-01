@@ -2,15 +2,11 @@ import httpx
 import asyncio
 import datetime
 import random
+import re
 from database import get_db, get_sys_config
 from logger import add_log
 
-QUALITY_MAP = {
-    "4k": 100, "2160p": 100, "uhd": 100,
-    "1080p": 80, "fhd": 80, "bdrip": 75,
-    "720p": 60, "hd": 60,
-    "dvd": 40, "remux": 95
-}
+QUALITY_MAP = {"4k": 100, "2160p": 100, "uhd": 100, "1080p": 80, "fhd": 80, "bdrip": 75, "720p": 60, "remux": 95}
 
 def get_quality_score(text: str) -> int:
     text = text.lower()
@@ -19,6 +15,7 @@ def get_quality_score(text: str) -> int:
         if key in text: score = max(score, weight)
     return score
 
+# ==================== 115网盘模块 ====================
 async def check_115_existing_quality(cookie: str, title: str):
     if not cookie: return None, 0
     await asyncio.sleep(random.uniform(0.2, 0.5))
@@ -35,8 +32,7 @@ async def check_115_existing_quality(cookie: str, title: str):
                 for f in file_list:
                     name = f.get("n", "")
                     score = get_quality_score(name)
-                    if score > max_score:
-                        max_score = score; best_match = name
+                    if score > max_score: max_score = score; best_match = name
                 return best_match, max_score
         except Exception: pass
     return None, 0
@@ -50,9 +46,90 @@ async def push_to_cms(cms_url: str, cms_token: str, link: str):
             res_json = res.json()
             if res_json.get("code") == 200: return True, res_json.get("msg")
             return False, res_json.get("msg", "未知错误")
-        except Exception as e:
-            return False, f"连接 CMS 失败: {str(e)}"
+        except Exception as e: return False, f"连接 CMS 失败: {str(e)}"
 
+# ==================== 夸克网盘模块 ====================
+async def push_to_quark(cookie: str, share_url: str, passcode: str = "", save_dir: str = "0"):
+    if not cookie: return False, "未配置夸克Cookie"
+    match = re.search(r'/s/([a-zA-Z0-9]+)', share_url)
+    if not match: return False, "无法解析夸克分享链接"
+    pwd_id = match.group(1)
+    
+    clean_save_dir = save_dir.split('-')[0].strip() if save_dir else "0"
+    
+    headers = {
+        "cookie": cookie, "content-type": "application/json",
+        "referer": f"https://pan.quark.cn/s/{pwd_id}",
+        "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) quark-cloud-drive/3.14.2 Chrome/112.0.5615.165 Safari/537.36"
+    }
+    
+    async with httpx.AsyncClient(timeout=20.0) as client:
+        try:
+            token_url = "https://pan.quark.cn/1/clouddrive/share/sharepage/token"
+            token_payload = {"pwd_id": pwd_id, "passcode": passcode}
+            info_res = await client.post(token_url, json=token_payload, headers=headers)
+            info_data = info_res.json()
+            if info_data.get("code") != 0: return False, f"夸克解析失败: {info_data.get('message', '未知错误')}"
+            stoken = info_data.get("data", {}).get("stoken")
+            if not stoken: return False, "未能提取 stoken"
+
+            detail_url = f"https://pan.quark.cn/1/clouddrive/share/sharepage/detail?pwd_id={pwd_id}&stoken={stoken}&pdir_fid=0"
+            detail_res = await client.get(detail_url, headers=headers)
+            detail_data = detail_res.json()
+            if detail_data.get("code") != 0: return False, f"获取文件列表失败: {detail_data.get('message', '未知错误')}"
+            file_list = detail_data.get("data", {}).get("list", [])
+            if not file_list: return False, "分享内无文件或为空目录"
+            
+            fid_list = [f["fid"] for f in file_list]
+            fid_token_list = [f["share_fid_token"] for f in file_list]
+            
+            save_url = "https://drive-pc.quark.cn/1/clouddrive/share/sharepage/save"
+            params = {"pr": "ucpro", "fr": "pc", "uc_param_str": "", "app": "clouddrive", "__dt": int(random.uniform(1, 5) * 60 * 1000), "__t": int(datetime.datetime.now().timestamp() * 1000)}
+            payload = {"fid_list": fid_list, "fid_token_list": fid_token_list, "to_pdir_fid": clean_save_dir, "pwd_id": pwd_id, "stoken": stoken, "pdir_fid": "0", "scene": "link"}
+            res = await client.post(save_url, params=params, json=payload, headers=headers)
+            res_json = res.json()
+            if res_json.get("code") == 0: return True, "夸克文件转存成功"
+            else: return False, res_json.get("message", "转存被拒绝")
+        except Exception as e: return False, f"夸克 API 异常: {str(e)}"
+
+# ==================== 阿里云盘模块 ====================
+async def push_to_aliyun(refresh_token: str, share_url: str, passcode: str = "", save_dir: str = "root"):
+    if not refresh_token: return False, "未配置阿里云盘 Refresh Token"
+    match = re.search(r'/s/([a-zA-Z0-9]+)', share_url)
+    if not match: return False, "无法解析阿里云盘分享链接"
+    share_id = match.group(1)
+    clean_save_dir = save_dir.split('-')[0].strip() if save_dir else "root"
+
+    async with httpx.AsyncClient(timeout=20.0) as client:
+        try:
+            refresh_res = await client.post("https://api.aliyundrive.com/token/refresh", json={"refresh_token": refresh_token})
+            refresh_data = refresh_res.json()
+            if "access_token" not in refresh_data: return False, "Token 刷新失败"
+            access_token = refresh_data["access_token"]
+            drive_id = refresh_data.get("default_drive_id")
+            auth_header = {"Authorization": f"Bearer {access_token}"}
+            
+            st_res = await client.post("https://api.aliyundrive.com/v2/share_link/get_share_token", json={"share_id": share_id, "share_pwd": passcode})
+            share_token = st_res.json().get("share_token")
+            if not share_token: return False, "获取 Share Token 失败"
+
+            info_res = await client.post(f"https://api.aliyundrive.com/adrive/v3/share_link/get_share_by_anonymous?share_id={share_id}", json={"share_id": share_id}, headers=auth_header)
+            file_infos = info_res.json().get("file_infos", [])
+            if not file_infos: return False, "分享链接内无文件"
+            
+            requests_list = []
+            for idx, f in enumerate(file_infos):
+                requests_list.append({
+                    "body": {"file_id": f["file_id"], "share_id": share_id, "auto_rename": True, "to_parent_file_id": clean_save_dir, "to_drive_id": drive_id},
+                    "headers": {"Content-Type": "application/json"}, "id": str(idx), "method": "POST", "url": "/file/copy"
+                })
+                
+            batch_res = await client.post("https://api.aliyundrive.com/adrive/v2/batch", json={"requests": requests_list, "resource": "file"}, headers={"Authorization": f"Bearer {access_token}", "x-share-token": share_token})
+            if batch_res.status_code in [200, 202]: return True, "阿里云盘文件极速转存成功"
+            else: return False, "阿里云盘转存被拒绝"
+        except Exception as e: return False, f"阿里云盘 API 异常: {str(e)}"
+
+# ==================== TMDB 数据采集 (融合日榜与周榜) ====================
 async def sync_tmdb_data(force=False):
     config = get_sys_config()
     api_key = config.get('api_key')
@@ -96,18 +173,32 @@ async def sync_tmdb_data(force=False):
                     for r in res_list: items.extend(r)
                     add_log("INFO", f"【库同步】剧集库已处理 {min(i+100, 500)} 页...")
             else:
-                add_log("INFO", f"【库同步】本地库充实({count}条)，执行每日热门增量更新...")
-            
-            for page in range(1, 6):
-                try:
-                    res_m = await client.get(f"{base_url}/3/trending/movie/day", params={"api_key": api_key, "language": "zh-CN", "page": page})
-                    res_t = await client.get(f"{base_url}/3/trending/tv/day", params={"api_key": api_key, "language": "zh-CN", "page": page})
-                    if res_m.status_code == 200:
-                        for m in res_m.json().get('results', []): m['media_type'] = 'movie'; items.append(m)
-                    if res_t.status_code == 200:
-                        for t in res_t.json().get('results', []): t['media_type'] = 'tv'; items.append(t)
-                except Exception: pass
+                # 【核心优化】：并发抓取 TMDB 电影/剧集的 "今日" 和 "本周" 趋势
+                add_log("INFO", f"【库同步】执行深度增量更新 (融合 TMDB 今日与本周趋势)...")
+                
+                async def fetch_trend(m_type, window, page):
+                    try:
+                        url = f"{base_url}/3/trending/{m_type}/{window}"
+                        r = await client.get(url, params={"api_key": api_key, "language": "zh-CN", "page": page})
+                        if r.status_code == 200:
+                            res_data = r.json().get('results', [])
+                            for m in res_data: m['media_type'] = m_type
+                            return res_data
+                    except Exception: pass
+                    return []
 
+                trend_tasks = []
+                # 同时抓取 day (日榜) 和 week (周榜)
+                for w in ['day', 'week']:
+                    for t in ['movie', 'tv']:
+                        for p in range(1, 6): # 每个榜单各抓取前 5 页
+                            trend_tasks.append(fetch_trend(t, w, p))
+                
+                trend_results = await asyncio.gather(*trend_tasks)
+                for res_arr in trend_results:
+                    items.extend(res_arr)
+
+            # 内存自动去重 (依托字典键的唯一性，TMDB ID 相同的会被覆盖合并)
             unique_items = {item['id']: item for item in items if item.get('id')}.values()
             if not unique_items: return
 
@@ -127,6 +218,7 @@ async def sync_tmdb_data(force=False):
         except Exception as e:
             add_log("ERROR", f"【库同步】严重异常: {str(e)}")
 
+# ==================== 调度主循环 ====================
 async def auto_subscription_task():
     await sync_tmdb_data(force=False)
     
@@ -135,46 +227,69 @@ async def auto_subscription_task():
     pansou_domain = config.get('pansou_domain', "http://192.168.68.200:8080")
     cms_url = config.get('cms_api_url')
     cms_token = config.get('cms_api_token')
+    
     cookie_115 = config.get('cookie_115')
-    if not cms_url or not cms_token: return
+    cookie_quark = config.get('cookie_quark')
+    token_aliyun = config.get('token_aliyun')
+    
+    quark_save_dir = config.get('quark_save_dir', '0')
+    aliyun_save_dir = config.get('aliyun_save_dir', 'root')
 
     conn = get_db()
-    subs = conn.execute("SELECT s.tmdb_id, m.title FROM subscriptions s JOIN media_items m ON s.tmdb_id = m.tmdb_id WHERE s.status = 'pending'").fetchall()
+    subs = conn.execute("SELECT s.tmdb_id, s.drive_type, m.title FROM subscriptions s JOIN media_items m ON s.tmdb_id = m.tmdb_id WHERE s.status = 'pending'").fetchall()
     conn.close()
     if not subs: return
 
     async with httpx.AsyncClient(timeout=30.0) as client:
         for sub in subs:
-            tmdb_id, title = sub['tmdb_id'], sub['title']
-            add_log("INFO", f"【搜刮】执行中: 《{title}》")
+            tmdb_id, title, drive_type = sub['tmdb_id'], sub['title'], sub['drive_type']
+            add_log("INFO", f"【搜刮】执行中: 《{title}》 目标网盘: {drive_type}")
             try:
                 ps_res = await client.post(f"{pansou_domain.rstrip('/')}/api/search", json={"kw": title})
                 data = ps_res.json().get("data", {}).get("merged_by_type", {})
                 
-                priorities = ["115", "aliyun", "ed2k", "magnet"]
-                best_link, hit_type, new_note = None, None, ""
+                if drive_type == 'quark': priorities = ["quark"]
+                elif drive_type == 'aliyun': priorities = ["aliyun"]
+                else: priorities = ["115", "aliyun", "ed2k", "magnet"]
+                    
+                best_link, hit_type, new_note, best_pwd = None, None, "", ""
                 for p_type in priorities:
-                    if data.get(p_type):
-                        best_link, hit_type, new_note = data[p_type][0]["url"], p_type, data[p_type][0].get("note", "")
+                    if data.get(p_type) and len(data[p_type]) > 0:
+                        item = data[p_type][0]
+                        best_link = item["url"]
+                        hit_type = p_type
+                        new_note = item.get("note", "")
+                        best_pwd = item.get("password", "") or item.get("pwd", "")
                         break
                 
                 if best_link:
-                    ex_file, ex_score = await check_115_existing_quality(cookie_115, title)
-                    new_score = get_quality_score(new_note or title)
-                    if ex_file and ex_score >= new_score:
-                        add_log("INFO", f"【跳过】网盘已有极佳版本: {ex_file}")
-                        # 核心修改：改为更新状态为成功，放入记录库
-                        conn = get_db(); conn.execute("UPDATE subscriptions SET status='success' WHERE tmdb_id=?", (tmdb_id,)); conn.commit(); conn.close()
-                        continue
+                    success, msg = False, ""
+                    
+                    if drive_type == 'quark':
+                        add_log("INFO", f"【推送】命中夸克资源(密码:{best_pwd or '无'})，转存至目录[{quark_save_dir.split('-')[0].strip()}]...")
+                        success, msg = await push_to_quark(cookie_quark, best_link, best_pwd, quark_save_dir)
+                    elif drive_type == 'aliyun':
+                        add_log("INFO", f"【推送】命中阿里云盘资源(密码:{best_pwd or '无'})，转存至目录[{aliyun_save_dir.split('-')[0].strip()}]...")
+                        success, msg = await push_to_aliyun(token_aliyun, best_link, best_pwd, aliyun_save_dir)
+                    else:
+                        if not cms_url or not cms_token:
+                            add_log("WARN", "未配置 CMS，跳过 115 节点")
+                            continue
+                        ex_file, ex_score = await check_115_existing_quality(cookie_115, title)
+                        new_score = get_quality_score(new_note or title)
+                        if ex_file and ex_score >= new_score:
+                            add_log("INFO", f"【跳过】网盘已有极佳版本: {ex_file}")
+                            conn = get_db(); conn.execute("UPDATE subscriptions SET status='success' WHERE tmdb_id=?", (tmdb_id,)); conn.commit(); conn.close()
+                            continue
+                        success, msg = await push_to_cms(cms_url, cms_token, best_link)
 
-                    success, msg = await push_to_cms(cms_url, cms_token, best_link)
                     if success:
-                        add_log("SUCCESS", f"【推送成功】《{title}》至 CMS ({hit_type})")
-                        # 核心修改：改为更新状态为成功，放入记录库
+                        add_log("SUCCESS", f"【成功】《{title}》已入库 ({hit_type})")
                         conn = get_db(); conn.execute("UPDATE subscriptions SET status='success' WHERE tmdb_id=?", (tmdb_id,)); conn.commit(); conn.close()
                     else:
-                        add_log("ERROR", f"【失败】CMS 拒绝: {msg}")
+                        add_log("ERROR", f"【失败】{msg}")
                 else:
-                    add_log("WARN", f"【搜刮】无《{title}》资源。")
-            except Exception: pass
+                    add_log("WARN", f"【搜刮】全网未找到符合 {drive_type} 的《{title}》资源。")
+            except Exception as e: 
+                add_log("ERROR", f"【异常】: {str(e)}")
             await asyncio.sleep(2)

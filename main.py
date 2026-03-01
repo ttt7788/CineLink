@@ -1,61 +1,80 @@
+import uvicorn
+import mimetypes
 import os
-import contextlib
+import asyncio
 from fastapi import FastAPI
-from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
-from fastapi.middleware.cors import CORSMiddleware
-from apscheduler.schedulers.asyncio import AsyncIOScheduler
-from apscheduler.triggers.cron import CronTrigger
+from fastapi.responses import FileResponse
 
+# 导入系统模块
 from database import init_db, get_sys_config
 from api_routes import router
 from scheduler import auto_subscription_task
 from logger import add_log
 
-# 全局调度器
-scheduler = AsyncIOScheduler()
+# ==========================================
+# 【核心修复】：强制修正 Windows 注册表 MIME 类型 Bug
+# 解决本地静态文件被识别为纯文本，导致 Vue 无法执行和页面白屏的问题
+# ==========================================
+mimetypes.add_type("application/javascript", ".js")
+mimetypes.add_type("text/css", ".css")
+mimetypes.add_type("image/svg+xml", ".svg")
 
-@contextlib.asynccontextmanager
-async def lifespan(app: FastAPI):
-    # --- 启动时执行 ---
+# 初始化 FastAPI 应用
+app = FastAPI(title="影视全自动订阅中枢")
+
+# ==========================================
+# 生命周期与后台任务管理
+# ==========================================
+@app.on_event("startup")
+async def startup_event():
+    # 1. 初始化数据库表结构
     init_db()
-    config = get_sys_config()
-    cron_expr = config.get("cron_expression", "0 * * * *")
+    add_log("INFO", "系统启动：数据库已就绪。")
     
-    try:
-        # 解析 cron: 分 时 日 月 周
-        parts = cron_expr.split()
-        if len(parts) == 5:
-            trigger = CronTrigger(minute=parts[0], hour=parts[1], day=parts[2], month=parts[3], day_of_week=parts[4])
-            scheduler.add_job(auto_subscription_task, trigger, id="auto_sub_task", replace_existing=True)
-            scheduler.start()
-            add_log("INFO", f"【系统启动】已加载定时任务，Cron表达式: {cron_expr}")
-        else:
-            add_log("WARN", "【系统启动】Cron 表达式格式错误，未能启动定时任务。")
-    except Exception as e:
-        add_log("ERROR", f"【系统启动】定时任务启动失败: {str(e)}")
+    # 2. 启动后台守护任务
+    asyncio.create_task(background_task_loop())
+
+async def background_task_loop():
+    add_log("INFO", "守护进程：后台自动搜刮与转存任务已启动。")
+    # 稍微延迟启动，等待服务完全拉起
+    await asyncio.sleep(5) 
+    while True:
+        try:
+            # 执行核心调度逻辑
+            await auto_subscription_task()
+        except Exception as e:
+            add_log("ERROR", f"后台守护任务异常: {e}")
         
-    yield
-    # --- 停止时执行 ---
-    scheduler.shutdown()
+        # 默认每 30 分钟 (1800秒) 轮询一次全网资源
+        await asyncio.sleep(1800) 
 
-app = FastAPI(lifespan=lifespan)
+# ==========================================
+# 路由与静态资源挂载
+# ==========================================
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-if not os.path.exists("static"): os.makedirs("static")
-app.mount("/static", StaticFiles(directory="static"), name="static")
+# 1. 注册 API 接口路由
 app.include_router(router)
 
-@app.get("/")
-def read_root(): return FileResponse("index.html")
+# 2. 挂载本地静态文件目录 (允许浏览器加载 static/lib 里的 JS 和 CSS)
+if not os.path.exists("static"):
+    os.makedirs("static")
+app.mount("/static", StaticFiles(directory="static"), name="static")
 
+# 3. 根路由：返回前端操作页面
+@app.get("/")
+async def root():
+    # 确保根目录下有 index.html 文件
+    if not os.path.exists("index.html"):
+        return {"error": "找不到 index.html 文件，请检查项目目录。"}
+    return FileResponse("index.html")
+
+# ==========================================
+# 主程序入口
+# ==========================================
 if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run(app, host="127.0.0.1", port=8000)
+    print("=======================================================")
+    print("🎬 影视中枢控制台启动中...")
+    print("👉 请在浏览器访问: http://127.0.0.1:8000")
+    print("=======================================================")
+    uvicorn.run("main:app", host="0.0.0.0", port=8000)
