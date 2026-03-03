@@ -13,6 +13,8 @@ class ConfigModel(BaseModel):
     token_aliyun: Optional[str] = ""
     quark_save_dir: Optional[str] = "0"
     aliyun_save_dir: Optional[str] = "root"
+    auto_subscribe_new: Optional[str] = "0"  
+    auto_subscribe_drive: Optional[str] = "115"  # 【新增】自动订阅的目标网盘
 
 class SubscribeModel(BaseModel):
     tmdb_id: int
@@ -55,3 +57,33 @@ class QrcodeStatusModel(BaseModel):
 
 class QrcodeLoginModel(BaseModel):
     uid: str
+
+class StrmConfigModel(BaseModel):
+    config_name: str
+    url: str
+    username: str
+    password: Optional[str] = ""
+    rootpath: str
+    target_directory: str
+    download_enabled: int = 1
+    update_mode: str = "incremental"
+    download_interval_range: str = "1-3"
+
+class StrmSettingsModel(BaseModel):
+    video_formats: str
+    subtitle_formats: str
+    image_formats: str
+    metadata_formats: str
+    size_threshold: int
+    download_threads: int
+
+class ReplaceDomainModel(BaseModel):
+    target_directory: str
+    old_domain: str
+    new_domain: str
+
+class StrmTaskModel(BaseModel):
+    task_name: str
+    config_id: int
+    cron_expression: str
+    is_enabled: int

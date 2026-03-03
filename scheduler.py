@@ -8,6 +8,11 @@ from logger import add_log
 
 QUALITY_MAP = {"4k": 100, "2160p": 100, "uhd": 100, "1080p": 80, "fhd": 80, "bdrip": 75, "720p": 60, "remux": 95}
 
+VALID_VIDEO_EXTS = (
+    '.mp4', '.mkv', '.avi', '.mov', '.flv', '.wmv', '.ts', '.m2ts', 
+    '.rmvb', '.iso', '.vob', '.webm', '.srt', '.ass', '.sub', '.nfo'
+)
+
 def get_quality_score(text: str) -> int:
     text = text.lower()
     score = 50 
@@ -58,9 +63,10 @@ async def push_to_quark(cookie: str, share_url: str, passcode: str = "", save_di
     clean_save_dir = save_dir.split('-')[0].strip() if save_dir else "0"
     
     headers = {
-        "cookie": cookie, "content-type": "application/json",
+        "cookie": cookie, 
+        "content-type": "application/json",
         "referer": f"https://pan.quark.cn/s/{pwd_id}",
-        "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) quark-cloud-drive/3.14.2 Chrome/112.0.5615.165 Safari/537.36"
+        "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
     }
     
     async with httpx.AsyncClient(timeout=20.0) as client:
@@ -73,15 +79,25 @@ async def push_to_quark(cookie: str, share_url: str, passcode: str = "", save_di
             stoken = info_data.get("data", {}).get("stoken")
             if not stoken: return False, "未能提取 stoken"
 
-            detail_url = f"https://pan.quark.cn/1/clouddrive/share/sharepage/detail?pwd_id={pwd_id}&stoken={stoken}&pdir_fid=0"
-            detail_res = await client.get(detail_url, headers=headers)
+            detail_url = "https://pan.quark.cn/1/clouddrive/share/sharepage/detail"
+            detail_params = {"pwd_id": pwd_id, "stoken": stoken, "pdir_fid": "0"}
+            detail_res = await client.get(detail_url, params=detail_params, headers=headers)
             detail_data = detail_res.json()
             if detail_data.get("code") != 0: return False, f"获取文件列表失败: {detail_data.get('message', '未知错误')}"
             file_list = detail_data.get("data", {}).get("list", [])
             if not file_list: return False, "分享内无文件或为空目录"
             
-            fid_list = [f["fid"] for f in file_list]
-            fid_token_list = [f["share_fid_token"] for f in file_list]
+            filtered_list = []
+            for f in file_list:
+                fname = f.get("file_name", "").lower()
+                is_folder = f.get("file_type") == 0 
+                if is_folder or fname.endswith(VALID_VIDEO_EXTS):
+                    filtered_list.append(f)
+            
+            if not filtered_list: return False, "分享链接内未找到视频格式文件 (可能为压缩包或无关引流文件)"
+            
+            fid_list = [f["fid"] for f in filtered_list]
+            fid_token_list = [f["share_fid_token"] for f in filtered_list]
             
             save_url = "https://drive-pc.quark.cn/1/clouddrive/share/sharepage/save"
             params = {"pr": "ucpro", "fr": "pc", "uc_param_str": "", "app": "clouddrive", "__dt": int(random.uniform(1, 5) * 60 * 1000), "__t": int(datetime.datetime.now().timestamp() * 1000)}
@@ -118,18 +134,25 @@ async def push_to_aliyun(refresh_token: str, share_url: str, passcode: str = "",
             if not file_infos: return False, "分享链接内无文件"
             
             requests_list = []
-            for idx, f in enumerate(file_infos):
-                requests_list.append({
-                    "body": {"file_id": f["file_id"], "share_id": share_id, "auto_rename": True, "to_parent_file_id": clean_save_dir, "to_drive_id": drive_id},
-                    "headers": {"Content-Type": "application/json"}, "id": str(idx), "method": "POST", "url": "/file/copy"
-                })
+            idx = 0
+            for f in file_infos:
+                fname = f.get("name", "").lower()
+                is_folder = f.get("type") == 'folder'
+                if is_folder or fname.endswith(VALID_VIDEO_EXTS):
+                    requests_list.append({
+                        "body": {"file_id": f["file_id"], "share_id": share_id, "auto_rename": True, "to_parent_file_id": clean_save_dir, "to_drive_id": drive_id},
+                        "headers": {"Content-Type": "application/json"}, "id": str(idx), "method": "POST", "url": "/file/copy"
+                    })
+                    idx += 1
+            
+            if not requests_list: return False, "分享链接内未找到视频格式文件 (可能为压缩包或无关引流文件)"
                 
             batch_res = await client.post("https://api.aliyundrive.com/adrive/v2/batch", json={"requests": requests_list, "resource": "file"}, headers={"Authorization": f"Bearer {access_token}", "x-share-token": share_token})
             if batch_res.status_code in [200, 202]: return True, "阿里云盘文件极速转存成功"
             else: return False, "阿里云盘转存被拒绝"
         except Exception as e: return False, f"阿里云盘 API 异常: {str(e)}"
 
-# ==================== TMDB 数据采集 (融合日榜与周榜) ====================
+# ==================== TMDB 数据采集 ====================
 async def sync_tmdb_data(force=False):
     config = get_sys_config()
     api_key = config.get('api_key')
@@ -148,7 +171,7 @@ async def sync_tmdb_data(force=False):
     async with httpx.AsyncClient(timeout=30.0) as client:
         try:
             if count < 15000:
-                add_log("INFO", f"【库同步】本地库不足({count}条)，启动并发大补全...")
+                add_log("INFO", f"【库同步】本地库不足({count}条)，启动并发大补全(目标500页)...")
                 sem = asyncio.Semaphore(15) 
                 async def fetch_page(m_type, page):
                     async with sem:
@@ -173,8 +196,7 @@ async def sync_tmdb_data(force=False):
                     for r in res_list: items.extend(r)
                     add_log("INFO", f"【库同步】剧集库已处理 {min(i+100, 500)} 页...")
             else:
-                # 【核心优化】：并发抓取 TMDB 电影/剧集的 "今日" 和 "本周" 趋势
-                add_log("INFO", f"【库同步】执行深度增量更新 (融合 TMDB 今日与本周趋势)...")
+                add_log("INFO", f"【库同步】基础库已饱满({count}条)，仅提取今日新增趋势...")
                 
                 async def fetch_trend(m_type, window, page):
                     try:
@@ -188,17 +210,15 @@ async def sync_tmdb_data(force=False):
                     return []
 
                 trend_tasks = []
-                # 同时抓取 day (日榜) 和 week (周榜)
-                for w in ['day', 'week']:
+                for w in ['day']:
                     for t in ['movie', 'tv']:
-                        for p in range(1, 6): # 每个榜单各抓取前 5 页
+                        for p in range(1, 16): 
                             trend_tasks.append(fetch_trend(t, w, p))
                 
                 trend_results = await asyncio.gather(*trend_tasks)
                 for res_arr in trend_results:
                     items.extend(res_arr)
 
-            # 内存自动去重 (依托字典键的唯一性，TMDB ID 相同的会被覆盖合并)
             unique_items = {item['id']: item for item in items if item.get('id')}.values()
             if not unique_items: return
 
@@ -213,6 +233,14 @@ async def sync_tmdb_data(force=False):
             cursor = conn.cursor()
             cursor.executemany('''INSERT OR REPLACE INTO media_items (tmdb_id, media_type, title, overview, poster_path, add_date) VALUES (?, ?, ?, ?, ?, ?)''', insert_data)
             cursor.execute("REPLACE INTO system_configs (config_key, config_value) VALUES ('last_sync_date', ?)", (today_str,))
+            
+            # 【核心优化】读取自动订阅的目标网盘，如果没有选择则默认 115
+            if count >= 15000 and config.get('auto_subscribe_new') == '1':
+                target_drive = config.get('auto_subscribe_drive', '115')
+                sub_data = [(item[0], target_drive) for item in insert_data]
+                cursor.executemany("INSERT OR IGNORE INTO subscriptions (tmdb_id, status, drive_type) VALUES (?, 'pending', ?)", sub_data)
+                add_log("INFO", f"【自动订阅】功能开启！已成功将 {len(sub_data)} 部今日趋势影视加入待搜刮队列，目标预设网盘：{target_drive}。")
+
             conn.commit()
             conn.close()
         except Exception as e:

@@ -1,0 +1,30 @@
+<div v-if="activeMenu === 'strm_settings'" class="settings-wrapper">
+    <h2>⚙️ STRM 媒体生成引擎设置</h2>
+    <el-card shadow="never" style="margin-bottom: 20px;">
+        <el-form label-position="top">
+            <el-row :gutter="20">
+                <el-col :span="12"><el-form-item label="视频格式放行规则 (逗号分隔)"><el-input v-model="strmSettings.video_formats"></el-input></el-form-item></el-col>
+                <el-col :span="12"><el-form-item label="字幕格式放行 (逗号分隔)"><el-input v-model="strmSettings.subtitle_formats"></el-input></el-form-item></el-col>
+            </el-row>
+            <el-row :gutter="20">
+                <el-col :span="12"><el-form-item label="图片格式放行 (逗号分隔)"><el-input v-model="strmSettings.image_formats"></el-input></el-form-item></el-col>
+                <el-col :span="12"><el-form-item label="元数据格式放行 (如 nfo)"><el-input v-model="strmSettings.metadata_formats"></el-input></el-form-item></el-col>
+            </el-row>
+            <el-row :gutter="20">
+                <el-col :span="12"><el-form-item label="体积过滤阈值 (MB以下跳过)"><el-input-number v-model="strmSettings.size_threshold" :min="0" style="width: 100%"></el-input-number></el-form-item></el-col>
+                <el-col :span="12"><el-form-item label="并发拉取网络线程数"><el-input-number v-model="strmSettings.download_threads" :min="1" :max="32" style="width: 100%"></el-input-number></el-form-item></el-col>
+            </el-row>
+            <el-button type="primary" size="large" @click="saveStrmSettings" style="margin-top:20px;">保存所有全局规则</el-button>
+        </el-form>
+    </el-card>
+
+    <h2>🛠️ STRM 域名一键修复引擎</h2>
+    <el-card shadow="never" style="max-width: 800px;">
+        <el-form label-position="top">
+            <el-form-item label="要处理的本地 STRM 物理根目录"><el-input v-model="replaceTool.target_directory" placeholder="/data/media"></el-input></el-form-item>
+            <el-form-item label="旧域名/IP (将被替换)"><el-input v-model="replaceTool.old_domain" placeholder="http://192.168.1.100:5244"></el-input></el-form-item>
+            <el-form-item label="新域名/IP (替换为)"><el-input v-model="replaceTool.new_domain" placeholder="https://strm.mydomain.com"></el-input></el-form-item>
+            <el-button type="warning" size="large" @click="runReplaceDomain"><el-icon><MagicStick></MagicStick></el-icon>在后台执行替换作业</el-button>
+        </el-form>
+    </el-card>
+</div>

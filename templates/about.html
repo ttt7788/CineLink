@@ -1,0 +1,78 @@
+<div v-if="activeMenu === 'about'" class="settings-wrapper">
+    <el-card shadow="never" style="margin-bottom: 20px; line-height: 1.8; border-radius: 12px;">
+        <div style="text-align: center; margin-bottom: 40px; margin-top: 20px;">
+            <el-icon style="font-size: 70px; color: #409EFF;"><Monitor></Monitor></el-icon>
+            <h1 style="margin: 15px 0 5px 0; font-weight: 800; letter-spacing: 1px;">CineLink 云幕智链</h1>
+            <p style="color: #888; font-size: 15px;">Version 2.0.0 Pro | 零境影视挂载中枢</p>
+            <el-tag type="success" effect="dark" round style="margin-top: 10px;">无人值守 · 极速转存 · 零空间防封</el-tag>
+        </div>
+
+        <el-divider content-position="center" style="margin-bottom: 30px;">
+            <span style="font-size: 18px; font-weight: bold; color: #303133;">🚀 系统核心能力矩阵</span>
+        </el-divider>
+
+        <el-row :gutter="20">
+            <el-col :span="12" style="margin-bottom: 20px;">
+                <el-card shadow="hover" style="height: 100%; border-radius: 8px;">
+                    <template #header>
+                        <div style="font-weight: bold; font-size: 16px; display: flex; align-items: center;">
+                            <el-icon style="margin-right: 8px; color: #E6A23C; font-size: 20px;"><VideoCamera></VideoCamera></el-icon> 全自动影视搜刮与订阅
+                        </div>
+                    </template>
+                    <ul style="padding-left: 20px; color: #555; margin: 0;">
+                        <li style="margin-bottom: 8px;">每日自动同步 TMDB 最新的热门电影/剧集趋势。</li>
+                        <li style="margin-bottom: 8px;">支持开启全局开关：发现今日新热剧，<strong>自动将其加入待搜刮队列</strong>。</li>
+                        <li>支持全网聚合盘搜，多渠道智能匹配最佳高画质资源。</li>
+                    </ul>
+                </el-card>
+            </el-col>
+            
+            <el-col :span="12" style="margin-bottom: 20px;">
+                <el-card shadow="hover" style="height: 100%; border-radius: 8px;">
+                    <template #header>
+                        <div style="font-weight: bold; font-size: 16px; display: flex; align-items: center;">
+                            <el-icon style="margin-right: 8px; color: #409EFF; font-size: 20px;"><Cloudy></Cloudy></el-icon> 多网盘极速转存引擎
+                        </div>
+                    </template>
+                    <ul style="padding-left: 20px; color: #555; margin: 0;">
+                        <li style="margin-bottom: 8px;">原生支持 <strong>115网盘、夸克网盘、阿里云盘</strong> 多引擎接入。</li>
+                        <li style="margin-bottom: 8px;">智能转存过滤：自动剔除引流广告(.exe)、压缩包，<strong>仅提取视频和字幕</strong>。</li>
+                        <li>独立配置保存路径，实现多盘空间资源的完美利用隔离。</li>
+                    </ul>
+                </el-card>
+            </el-col>
+        </el-row>
+
+        <el-row :gutter="20">
+            <el-col :span="12">
+                <el-card shadow="hover" style="height: 100%; border-radius: 8px;">
+                    <template #header>
+                        <div style="font-weight: bold; font-size: 16px; display: flex; align-items: center;">
+                            <el-icon style="margin-right: 8px; color: #67C23A; font-size: 20px;"><Connection></Connection></el-icon> STRM 本地虚拟映射
+                        </div>
+                    </template>
+                    <ul style="padding-left: 20px; color: #555; margin: 0;">
+                        <li style="margin-bottom: 8px;">完美接管 Emby / Jellyfin / Plex：将云端网盘瞬间变为本地海量影视库。</li>
+                        <li style="margin-bottom: 8px;"><strong>极致增量优化：</strong>基于 SQLite 本地数据库缓存，抛弃低效磁盘遍历。</li>
+                        <li>内置域名一键修复/替换工具，轻松应对外网穿透变动。</li>
+                    </ul>
+                </el-card>
+            </el-col>
+
+            <el-col :span="12">
+                <el-card shadow="hover" style="height: 100%; border-radius: 8px;">
+                    <template #header>
+                        <div style="font-weight: bold; font-size: 16px; display: flex; align-items: center;">
+                            <el-icon style="margin-right: 8px; color: #F56C6C; font-size: 20px;"><Timer></Timer></el-icon> 自动化调度与防风控
+                        </div>
+                    </template>
+                    <ul style="padding-left: 20px; color: #555; margin: 0;">
+                        <li style="margin-bottom: 8px;"><strong>Cron表达式控制：</strong>后台守护进程自动处理资源下发与转存。</li>
+                        <li style="margin-bottom: 8px;">安全随机休眠机制：避免 WebDAV 拉取过快导致触发网盘 403 / 405 封控。</li>
+                        <li>完善的运行日志与前端实时无感自动刷新。</li>
+                    </ul>
+                </el-card>
+            </el-col>
+        </el-row>
+    </el-card>
+</div>

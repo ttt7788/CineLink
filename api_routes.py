@@ -15,7 +15,15 @@ def get_config(): return get_sys_config()
 def update_config(config: ConfigModel):
     conn = get_db()
     try:
-        fields = [('api_domain', config.api_domain), ('image_domain', config.image_domain), ('api_key', config.api_key), ('pansou_domain', config.pansou_domain), ('cron_expression', config.cron_expression), ('cms_api_url', config.cms_api_url), ('cms_api_token', config.cms_api_token), ('cookie_quark', config.cookie_quark), ('token_aliyun', config.token_aliyun), ('quark_save_dir', config.quark_save_dir), ('aliyun_save_dir', config.aliyun_save_dir)]
+        fields = [
+            ('api_domain', config.api_domain), ('image_domain', config.image_domain), 
+            ('api_key', config.api_key), ('pansou_domain', config.pansou_domain), 
+            ('cron_expression', config.cron_expression), ('cms_api_url', config.cms_api_url), 
+            ('cms_api_token', config.cms_api_token), ('cookie_quark', config.cookie_quark), 
+            ('token_aliyun', config.token_aliyun), ('quark_save_dir', config.quark_save_dir), 
+            ('aliyun_save_dir', config.aliyun_save_dir), ('auto_subscribe_new', config.auto_subscribe_new),
+            ('auto_subscribe_drive', config.auto_subscribe_drive) # 【新增】保存默认订阅网盘
+        ]
         for key, value in fields: conn.execute("REPLACE INTO system_configs (config_key, config_value) VALUES (?, ?)", (key, value))
         conn.commit()
         return {"message": "配置保存成功"}
@@ -176,7 +184,6 @@ async def api_drive_action(req: DriveActionReq):
         elif req.action == 'delete': success, msg = await api.delete(req.file_id)
         return {"code": 200 if success else 500, "msg": msg}
     except Exception as e: return {"code": 500, "msg": str(e)}
-
 
 @router.get("/api/115/qrcode")
 async def get_115_qr():
