@@ -1,6 +1,0 @@
-fastapi
-uvicorn
-httpx
-pydantic
-jinja2
-easywebdav
