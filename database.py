@@ -1,21 +1,7 @@
 import sqlite3
-import os
-
-# 【核心修改】将数据库存放于独立的 data 目录下
-DB_DIR = "data"
-DB_PATH = os.path.join(DB_DIR, "tmdb_system.db")
 
 def init_db():
-    # 1. 自动创建数据库存放目录
-    if not os.path.exists(DB_DIR):
-        os.makedirs(DB_DIR, exist_ok=True)
-        
-    # 2. 防呆检测：如果之前被 Docker 错误挂载成了文件夹，给出明显提示
-    if os.path.isdir(DB_PATH):
-        raise Exception(f"致命错误：{DB_PATH} 被错误地创建为了文件夹！请删除宿主机上的同名文件夹并重新启动。")
-
-    # 3. 连接数据库（如果文件不存在，SQLite 会自动创建空 db 文件）
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect('tmdb_system.db')
     cursor = conn.cursor()
     
     cursor.execute('''CREATE TABLE IF NOT EXISTS system_configs (config_key VARCHAR(50) UNIQUE PRIMARY KEY, config_value VARCHAR(255))''')
@@ -35,7 +21,7 @@ def init_db():
         ('cron_expression', '0 * * * *'), ('cms_api_url', 'http://192.168.68.200:8090'),
         ('cms_api_token', 'cloud_media_sync'), ('last_sync_date', ''),
         ('auto_subscribe_new', '0'), 
-        ('auto_subscribe_drive', '115')
+        ('auto_subscribe_drive', '115')  # 【新增】默认值为115网盘
     ]
     cursor.executemany('INSERT OR IGNORE INTO system_configs (config_key, config_value) VALUES (?, ?)', default_configs)
 
@@ -66,7 +52,7 @@ def init_db():
     conn.close()
 
 def get_db():
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect('tmdb_system.db')
     conn.row_factory = sqlite3.Row
     return conn
 
