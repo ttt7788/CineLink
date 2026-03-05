@@ -153,13 +153,19 @@ async def push_to_aliyun(refresh_token: str, share_url: str, passcode: str = "",
         except Exception as e: return False, f"阿里云盘 API 异常: {str(e)}"
 
 # ==================== TMDB 数据采集 ====================
-async def sync_tmdb_data(force=False):
+# 增加 mode 参数，精确区分“只采前10页热门”和“首次补全500页基础库”
+async def sync_tmdb_data(force=False, mode="all"):
     config = get_sys_config()
     api_key = config.get('api_key')
-    if not api_key: return
+    
+    if not api_key: 
+        add_log("WARNING", "【库同步】跳过：未配置 TMDB API Key。")
+        return
 
     today_str = datetime.date.today().isoformat()
-    if not force and config.get('last_sync_date') == today_str: return 
+    # 如果不是强制且今天已同步，并且是全量日常定时任务，则跳过
+    if not force and config.get('last_sync_date') == today_str and mode == "all": 
+        return 
 
     conn = get_db()
     count = conn.execute("SELECT COUNT(*) FROM media_items").fetchone()[0]
@@ -170,8 +176,34 @@ async def sync_tmdb_data(force=False):
 
     async with httpx.AsyncClient(timeout=30.0) as client:
         try:
-            if count < 15000:
-                add_log("INFO", f"【库同步】本地库不足({count}条)，启动并发大补全(目标500页)...")
+            # 1. 【今日热门】模式：只采集前 10 页
+            if mode in ["all", "trending"]:
+                add_log("INFO", f"【库同步】开始极速抓取今日新增热门趋势 (前 10 页)...")
+                
+                async def fetch_trend(m_type, window, page):
+                    try:
+                        url = f"{base_url}/3/trending/{m_type}/{window}"
+                        r = await client.get(url, params={"api_key": api_key, "language": "zh-CN", "page": page})
+                        if r.status_code == 200:
+                            res_data = r.json().get('results', [])
+                            for m in res_data: m['media_type'] = m_type
+                            return res_data
+                    except Exception: pass
+                    return []
+
+                trend_tasks = []
+                for w in ['day']:
+                    for t in ['movie', 'tv']:
+                        for p in range(1, 11): 
+                            trend_tasks.append(fetch_trend(t, w, p))
+                
+                trend_results = await asyncio.gather(*trend_tasks)
+                for res_arr in trend_results:
+                    items.extend(res_arr)
+
+            # 2. 【基础库】模式：首次部署库数据不足时，采集500页。一旦饱满永远不再执行。
+            if count < 15000 and mode in ["all", "base"]:
+                add_log("INFO", f"【库同步】历史库数据不足({count}条)，启动并发大补全(电影/剧集各500页)...")
                 sem = asyncio.Semaphore(15) 
                 async def fetch_page(m_type, page):
                     async with sem:
@@ -195,29 +227,6 @@ async def sync_tmdb_data(force=False):
                     res_list = await asyncio.gather(*tasks_t[i:i+100])
                     for r in res_list: items.extend(r)
                     add_log("INFO", f"【库同步】剧集库已处理 {min(i+100, 500)} 页...")
-            else:
-                add_log("INFO", f"【库同步】基础库已饱满({count}条)，仅提取今日新增趋势...")
-                
-                async def fetch_trend(m_type, window, page):
-                    try:
-                        url = f"{base_url}/3/trending/{m_type}/{window}"
-                        r = await client.get(url, params={"api_key": api_key, "language": "zh-CN", "page": page})
-                        if r.status_code == 200:
-                            res_data = r.json().get('results', [])
-                            for m in res_data: m['media_type'] = m_type
-                            return res_data
-                    except Exception: pass
-                    return []
-
-                trend_tasks = []
-                for w in ['day']:
-                    for t in ['movie', 'tv']:
-                        for p in range(1, 16): 
-                            trend_tasks.append(fetch_trend(t, w, p))
-                
-                trend_results = await asyncio.gather(*trend_tasks)
-                for res_arr in trend_results:
-                    items.extend(res_arr)
 
             unique_items = {item['id']: item for item in items if item.get('id')}.values()
             if not unique_items: return
@@ -232,26 +241,36 @@ async def sync_tmdb_data(force=False):
             conn = get_db()
             cursor = conn.cursor()
             cursor.executemany('''INSERT OR REPLACE INTO media_items (tmdb_id, media_type, title, overview, poster_path, add_date) VALUES (?, ?, ?, ?, ?, ?)''', insert_data)
-            cursor.execute("REPLACE INTO system_configs (config_key, config_value) VALUES ('last_sync_date', ?)", (today_str,))
             
-            # 【核心优化】读取自动订阅的目标网盘，如果没有选择则默认 115
-            if count >= 15000 and config.get('auto_subscribe_new') == '1':
+            # 只有全量同步时才刷新今日的同步状态标识
+            if mode == "all":
+                cursor.execute("REPLACE INTO system_configs (config_key, config_value) VALUES ('last_sync_date', ?)", (today_str,))
+            
+            # 【防止自动订阅爆炸】只有日常定时更新（库已满）且抓取了每日热点时，才将当天的数据丢入自动订阅。
+            if count >= 15000 and config.get('auto_subscribe_new') == '1' and mode in ["all", "trending"]:
                 target_drive = config.get('auto_subscribe_drive', '115')
                 sub_data = [(item[0], target_drive) for item in insert_data]
                 cursor.executemany("INSERT OR IGNORE INTO subscriptions (tmdb_id, status, drive_type) VALUES (?, 'pending', ?)", sub_data)
-                add_log("INFO", f"【自动订阅】功能开启！已成功将 {len(sub_data)} 部今日趋势影视加入待搜刮队列，目标预设网盘：{target_drive}。")
+                add_log("INFO", f"【自动订阅】功能开启！已成功将 {len(sub_data)} 部趋势影视加入待搜刮队列，目标：{target_drive}。")
 
             conn.commit()
             conn.close()
+            add_log("INFO", f"【库同步】执行完毕 (模式: {mode})，系统运转流畅！")
         except Exception as e:
             add_log("ERROR", f"【库同步】严重异常: {str(e)}")
 
 # ==================== 调度主循环 ====================
 async def auto_subscription_task():
-    await sync_tmdb_data(force=False)
+    config = get_sys_config()
+    api_key = config.get('api_key', '').strip()
+    auto_subscribe = str(config.get('auto_subscribe_new', '0'))
+    
+    if auto_subscribe == '1' and not api_key:
+        add_log("WARNING", "⏰ 定时任务警告：已开启自动订阅开关，但未配置 TMDB API Key，TMDB采集将被跳过。")
+        
+    await sync_tmdb_data(force=False, mode="all")
     
     add_log("INFO", "【定时任务】开始处理待搜刮的订阅任务...")
-    config = get_sys_config()
     pansou_domain = config.get('pansou_domain', "http://192.168.68.200:8080")
     cms_url = config.get('cms_api_url')
     cms_token = config.get('cms_api_token')

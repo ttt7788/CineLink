@@ -3,7 +3,7 @@ import datetime
 from fastapi import APIRouter, HTTPException
 from database import get_db, get_sys_config
 from models import ConfigModel, SubscribeModel, BatchSubscribeModel, BatchDeleteModel, SaveLinkModel, DriveListReq, DriveActionReq, QrcodeStatusModel, QrcodeLoginModel
-from logger import get_logs
+from logger import get_logs, add_log
 from drive_api import QuarkDrive, AliyunDrive
 
 router = APIRouter()
@@ -22,7 +22,7 @@ def update_config(config: ConfigModel):
             ('cms_api_token', config.cms_api_token), ('cookie_quark', config.cookie_quark), 
             ('token_aliyun', config.token_aliyun), ('quark_save_dir', config.quark_save_dir), 
             ('aliyun_save_dir', config.aliyun_save_dir), ('auto_subscribe_new', config.auto_subscribe_new),
-            ('auto_subscribe_drive', config.auto_subscribe_drive) # 【新增】保存默认订阅网盘
+            ('auto_subscribe_drive', config.auto_subscribe_drive)
         ]
         for key, value in fields: conn.execute("REPLACE INTO system_configs (config_key, config_value) VALUES (?, ?)", (key, value))
         conn.commit()
@@ -31,17 +31,44 @@ def update_config(config: ConfigModel):
 
 @router.get("/api/sync")
 async def sync_daily_data():
+    config = get_sys_config()
+    api_key = config.get('api_key', '').strip()
+    
+    if not api_key:
+        add_log("WARNING", "手动触发 TMDB 采集失败：未配置 API Key")
+        return {"status": "error", "message": "未配置 TMDB API Key，请先在【TMDB与盘搜源配置】中填写！"}
+        
+    add_log("INFO", "已检测到 TMDB API Key，后台马上开始采集数据...")
     from scheduler import sync_tmdb_data
     import asyncio
     asyncio.create_task(sync_tmdb_data(force=True))
-    return {"status": "success", "message": "全量数据入库操作已启动"}
+    
+    return {"status": "success", "message": "全量数据入库操作已马上启动，请留意系统运行日志！"}
 
+# 【核心优化】：将同步方法变为 async，加入“第一次访问空白时，立刻拦截并采集前10页”的逻辑
 @router.get("/api/local_media")
-def get_local_media(type: str = 'hot', page: int = 1, size: int = 30):
+async def get_local_media(type: str = 'hot', page: int = 1, size: int = 30):
     conn = get_db()
     today_str = datetime.date.today().isoformat()
+    
+    # 【优化项】检查今日热门数据是否为空
+    c_q_today = "SELECT COUNT(*) FROM media_items WHERE add_date = ?"
+    today_count = conn.execute(c_q_today, (today_str,)).fetchone()[0]
+    
+    # 如果今天是空白的（例如您第一次访问，定时任务还没跑）
+    if today_count == 0:
+        conn.close() # 先释放连接防卡死
+        config = get_sys_config()
+        if config.get('api_key'):
+            from scheduler import sync_tmdb_data
+            add_log("INFO", "🚀 首次访问触发：今日热门数据为空，立刻开启极速同步 (前10页)...")
+            # 阻塞等待同步完成（10页通常只要2~3秒，体验极佳）
+            await sync_tmdb_data(force=True, max_pages=10)
+        conn = get_db() # 同步完重新获取连接
+
     offset = (page - 1) * size
     sub_dict = {row['tmdb_id']: row['status'] for row in conn.execute("SELECT tmdb_id, status FROM subscriptions").fetchall()}
+    
     if type == 'hot':
         c_q, d_q = "SELECT COUNT(*) FROM media_items WHERE add_date = ?", "SELECT * FROM media_items WHERE add_date = ? ORDER BY add_date DESC, tmdb_id DESC LIMIT ? OFFSET ?"
         p_c, p_d = (today_str,), (today_str, size, offset)
@@ -51,9 +78,11 @@ def get_local_media(type: str = 'hot', page: int = 1, size: int = 30):
     else:
         c_q, d_q = "SELECT COUNT(*) FROM media_items WHERE media_type='tv'", "SELECT * FROM media_items WHERE media_type='tv' ORDER BY add_date DESC, tmdb_id DESC LIMIT ? OFFSET ?"
         p_c, p_d = (), (size, offset)
+        
     total = conn.execute(c_q, p_c).fetchone()[0]
     rows = conn.execute(d_q, p_d).fetchall()
     conn.close()
+    
     return {"total": total, "items": [{**dict(row), 'sub_status': sub_dict.get(row['tmdb_id'])} for row in rows]}
 
 @router.get("/api/search")
