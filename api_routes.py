@@ -223,7 +223,7 @@ async def api_drive_action(req: DriveActionReq):
         return {"code": 200 if success else 500, "msg": msg}
     except Exception as e: return {"code": 500, "msg": str(e)}
 
-# ==================== 【核心修复】115 扫码登录接口伪装与容错 ====================
+# ==================== 115 扫码登录接口：带有最强抗风控头信息 ====================
 HEADERS_115 = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
     "Accept": "application/json, text/plain, */*"
@@ -234,12 +234,10 @@ async def get_115_qr():
     try:
         async with httpx.AsyncClient(timeout=10.0) as client: 
             res = await client.get("https://qrcodeapi.115.com/api/1.0/web/1.0/token/", headers=HEADERS_115)
-            # 防止 115 依然拦截返回非 JSON，主动抛出异常被我们捕获
             res.raise_for_status() 
             return res.json()
     except Exception as e:
         add_log("ERROR", f"获取 115 二维码失败: {str(e)}")
-        # 抛出标准的 HTTP 错误给前端，这样前端就不会“毫无反应”，而是能弹窗提示
         raise HTTPException(status_code=500, detail=f"网络请求或 115 接口拦截: {str(e)}")
 
 @router.post("/api/115/status")
