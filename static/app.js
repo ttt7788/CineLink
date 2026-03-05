@@ -104,7 +104,6 @@ const app = createApp({
                 stopLogPoll();
             }
 
-            // 清理二维码定时器
             if (pTimer.value) {
                 clearInterval(pTimer.value);
                 pTimer.value = null;
@@ -147,7 +146,7 @@ const app = createApp({
             } catch (e) {} 
         };
         
-        // 【核心修复】115 网盘扫码状态轮询机制
+        // 扫码状态轮询机制
         const poll115Status = async () => {
             if (!qTok.value) return;
             try {
@@ -163,22 +162,21 @@ const app = createApp({
                     qSt.value = '✅ 登录成功，正在提取 Cookie...';
                     clearInterval(pTimer.value);
                     pTimer.value = null;
-                    // 请求后端用 uid 换取完整 Cookie 并保存
                     await axios.post(`${API_BASE}/115/login`, { uid: qTok.value.uid });
                     ElMessage.success('115 网盘授权成功！');
-                    loadConfig(); // 刷新页面数据，让 Cookie 框回显
-                    qUrl.value = ''; // 隐藏二维码
+                    loadConfig(); 
+                    qUrl.value = ''; 
                 } else if (st === -1 || st === -2) {
                     qSt.value = '❌ 二维码已过期或失效，请重新生成';
                     clearInterval(pTimer.value);
                     pTimer.value = null;
                 }
             } catch (e) {
-                // 如果是偶尔的网络抖动，不打断轮询
+                // 网络抖动静默处理
             }
         };
 
-        // 【核心修复】115 网盘获取二维码逻辑
+        // 获取二维码与防错处理
         const generate115QrCode = async () => {
             if (pTimer.value) clearInterval(pTimer.value);
             qrLoading.value = true;
@@ -186,16 +184,18 @@ const app = createApp({
             qSt.value = '正在向 115 请求二维码...';
             try {
                 const r = await axios.get(`${API_BASE}/115/qrcode`);
-                const d = r.data.data;
-                qTok.value = d;
-                // 115 的登录二维码固定拼接格式
-                qUrl.value = d.qrcode || `https://qrcodeapi.115.com/api/1.0/web/1.0/login/qrcode?uid=${d.uid}`;
-                qSt.value = '请使用 115 App 扫码';
-                // 每 2 秒查一次扫码状态
-                pTimer.value = setInterval(poll115Status, 2000);
+                if (r.data && r.data.data) {
+                    const d = r.data.data;
+                    qTok.value = d;
+                    qUrl.value = `https://qrcodeapi.115.com/api/1.0/web/1.0/login/qrcode?uid=${d.uid}`;
+                    qSt.value = '请使用 115 App 扫码';
+                    pTimer.value = setInterval(poll115Status, 2000);
+                } else {
+                    throw new Error("接口返回格式异常");
+                }
             } catch (e) {
                 qSt.value = '二维码请求失败';
-                ElMessage.error('无法获取 115 二维码: ' + (e.response?.data?.detail || e.message));
+                ElMessage.error('无法获取115二维码: ' + (e.response?.data?.detail || e.message));
             } finally {
                 qrLoading.value = false;
             }
