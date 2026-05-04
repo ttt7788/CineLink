@@ -12,6 +12,7 @@ from api_routes import router
 from strm_routes import strm_router
 from scheduler import auto_subscription_task
 from logger import add_log
+from internal_webdav import start_internal_webdav, stop_internal_webdav
 
 # 修复 Windows 注册表 MIME 类型 Bug
 mimetypes.add_type("application/javascript", ".js")
@@ -36,11 +37,13 @@ async def lifespan(app: FastAPI):
     add_log("INFO", "🚀 CineLink 核心引擎开始启动...")
     init_db()
     add_log("INFO", "✅ SQLite 数据库与数据表初始化就绪。")
+    start_internal_webdav()
     task = asyncio.create_task(background_task_loop())
     add_log("INFO", "🌐 核心路由接口、STRM矩阵模块与静态资源加载完成。")
     add_log("INFO", "🎉 CineLink 系统启动完毕，正在监听端口请求。")
     yield
     task.cancel()
+    stop_internal_webdav()
     add_log("WARNING", "🛑 系统收到关闭信号，后台守护进程与服务器已安全终止。")
 
 # 【核心修改】API 接口文档增加版本号 v2.0.1
@@ -68,7 +71,7 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 async def root(request: Request):
     if not os.path.exists("templates/index.html"):
         return {"error": "未找到 templates/index.html"}
-    return templates.TemplateResponse("index.html", {"request": request})
+    return templates.TemplateResponse(request, "index.html")
 
 if __name__ == "__main__":
     # 【核心修改】终端启动横幅增加版本号 v2.0.1

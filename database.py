@@ -19,7 +19,23 @@ def init_db():
     cursor = conn.cursor()
     
     cursor.execute('''CREATE TABLE IF NOT EXISTS system_configs (config_key VARCHAR(50) UNIQUE PRIMARY KEY, config_value VARCHAR(255))''')
-    cursor.execute('''CREATE TABLE IF NOT EXISTS media_items (tmdb_id INTEGER PRIMARY KEY, media_type VARCHAR(20), title VARCHAR(255), overview TEXT, poster_path VARCHAR(255), add_date DATE)''')
+    cursor.execute('''CREATE TABLE IF NOT EXISTS media_items (
+                    tmdb_id INTEGER PRIMARY KEY, media_type VARCHAR(20), title VARCHAR(255),
+                    overview TEXT, poster_path VARCHAR(255), add_date DATE,
+                    is_trending INTEGER DEFAULT 0, trend_date DATE,
+                    popularity REAL DEFAULT 0, vote_average REAL DEFAULT 0)''')
+    for sql in [
+        "ALTER TABLE media_items ADD COLUMN is_trending INTEGER DEFAULT 0",
+        "ALTER TABLE media_items ADD COLUMN trend_date DATE",
+        "ALTER TABLE media_items ADD COLUMN popularity REAL DEFAULT 0",
+        "ALTER TABLE media_items ADD COLUMN vote_average REAL DEFAULT 0",
+    ]:
+        try:
+            cursor.execute(sql)
+        except sqlite3.OperationalError:
+            pass
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_media_hot ON media_items(is_trending, trend_date, popularity)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_media_type_popularity ON media_items(media_type, popularity)")
     cursor.execute('''CREATE TABLE IF NOT EXISTS subscriptions (id INTEGER PRIMARY KEY AUTOINCREMENT, tmdb_id INTEGER UNIQUE, status VARCHAR(20) DEFAULT 'pending')''')
     try:
         cursor.execute("ALTER TABLE subscriptions ADD COLUMN drive_type VARCHAR(20) DEFAULT '115'")
@@ -33,24 +49,33 @@ def init_db():
         ('api_domain', 'https://api.tmdb.org'), # 保留官方公共域名
         ('image_domain', 'https://image.tmdb.org'), # 保留官方公共域名
         ('pansou_domain', ''), # 置空
-        ('cookie_115', ''), 
-        ('cookie_quark', ''), 
+        ('cookie_115', ''),
+        ('cookie_quark', ''),
         ('token_aliyun', ''),
-        ('quark_save_dir', '0'), 
+        ('quark_save_dir', '0'),
         ('aliyun_save_dir', 'root'), 
         ('cron_expression', '0 * * * *'), # 保留标准 Cron 表达式
         ('cms_api_url', ''), # 置空
         ('cms_api_token', ''), # 置空
         ('last_sync_date', ''),
-        ('auto_subscribe_new', '0'), 
+        ('last_trending_sync_date', ''),
+        ('last_movie_sync_date', ''),
+        ('last_tv_sync_date', ''),
+        ('last_base_sync_date', ''),
+        ('auto_subscribe_new', '0'),
         ('auto_subscribe_drive', '115')
     ]
     cursor.executemany('INSERT OR IGNORE INTO system_configs (config_key, config_value) VALUES (?, ?)', default_configs)
 
     cursor.execute('''CREATE TABLE IF NOT EXISTS strm_configs (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT, config_name TEXT, url TEXT, username TEXT, 
+                    id INTEGER PRIMARY KEY AUTOINCREMENT, source_type TEXT DEFAULT 'webdav',
+                    config_name TEXT, url TEXT, username TEXT,
                     password TEXT, rootpath TEXT, target_directory TEXT, download_enabled INTEGER DEFAULT 1,
                     update_mode TEXT DEFAULT 'incremental', download_interval_range TEXT DEFAULT '1-3')''')
+    try:
+        cursor.execute("ALTER TABLE strm_configs ADD COLUMN source_type TEXT DEFAULT 'webdav'")
+    except sqlite3.OperationalError:
+        pass
 
     cursor.execute('''CREATE TABLE IF NOT EXISTS strm_settings (
                     id INTEGER PRIMARY KEY AUTOINCREMENT, video_formats TEXT, subtitle_formats TEXT,

@@ -1,5 +1,5 @@
 from pydantic import BaseModel
-from typing import Optional, List
+from typing import Optional, List, Union
 
 class ConfigModel(BaseModel):
     api_domain: str
@@ -9,7 +9,7 @@ class ConfigModel(BaseModel):
     cron_expression: str
     cms_api_url: str
     cms_api_token: str
-    cookie_quark: Optional[str] = "" 
+    cookie_quark: Optional[str] = ""
     token_aliyun: Optional[str] = ""
     quark_save_dir: Optional[str] = "0"
     aliyun_save_dir: Optional[str] = "root"
@@ -58,7 +58,16 @@ class QrcodeStatusModel(BaseModel):
 class QrcodeLoginModel(BaseModel):
     uid: str
 
+class AliyunQrcodeStatusModel(BaseModel):
+    sid: Union[str, int]
+    t: Optional[Union[str, int]] = None
+    ck: Optional[str] = None
+
+class AliyunQrcodeLoginModel(BaseModel):
+    auth_code: str
+
 class StrmConfigModel(BaseModel):
+    source_type: Optional[str] = "webdav"
     config_name: str
     url: str
     username: str
