@@ -9,16 +9,96 @@ from logger import add_log
 QUALITY_MAP = {"4k": 100, "2160p": 100, "uhd": 100, "1080p": 80, "fhd": 80, "bdrip": 75, "720p": 60, "remux": 95}
 
 VALID_VIDEO_EXTS = (
-    '.mp4', '.mkv', '.avi', '.mov', '.flv', '.wmv', '.ts', '.m2ts', 
+    '.mp4', '.mkv', '.avi', '.mov', '.flv', '.wmv', '.ts', '.m2ts',
     '.rmvb', '.iso', '.vob', '.webm', '.srt', '.ass', '.sub', '.nfo'
 )
 
+TMDB_TRENDING_PAGES = 10
+TMDB_BASE_PAGES = 500
+TMDB_BATCH_SIZE = 50
+TMDB_CONCURRENCY = 20
+TMDB_BASE_MIN_COUNT = 10000
+_tmdb_sync_locks = {
+    "trending": asyncio.Lock(),
+    "movie": asyncio.Lock(),
+    "tv": asyncio.Lock(),
+}
+
 def get_quality_score(text: str) -> int:
     text = text.lower()
-    score = 50 
+    score = 50
     for key, weight in QUALITY_MAP.items():
         if key in text: score = max(score, weight)
     return score
+
+def _media_tuple(item, today_str, is_trending=False):
+    title = item.get('title') or item.get('name')
+    poster = item.get('poster_path')
+    if not title or not poster or not item.get('id'):
+        return None
+    return (
+        item['id'],
+        item.get('media_type', 'movie'),
+        title,
+        item.get('overview', ''),
+        poster,
+        today_str,
+        1 if is_trending else 0,
+        today_str if is_trending else None,
+        float(item.get('popularity') or 0),
+        float(item.get('vote_average') or 0),
+    )
+
+def _upsert_media_items(items, today_str, is_trending=False):
+    rows = []
+    seen_ids = set()
+    for item in items:
+        row = _media_tuple(item, today_str, is_trending)
+        if not row or row[0] in seen_ids:
+            continue
+        seen_ids.add(row[0])
+        rows.append(row)
+
+    if not rows:
+        return []
+
+    conn = get_db()
+    cursor = conn.cursor()
+    cursor.executemany('''
+        INSERT INTO media_items
+            (tmdb_id, media_type, title, overview, poster_path, add_date,
+             is_trending, trend_date, popularity, vote_average)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(tmdb_id) DO UPDATE SET
+            media_type=excluded.media_type,
+            title=excluded.title,
+            overview=excluded.overview,
+            poster_path=excluded.poster_path,
+            add_date=excluded.add_date,
+            is_trending=CASE
+                WHEN excluded.is_trending = 1 THEN 1
+                ELSE media_items.is_trending
+            END,
+            trend_date=CASE
+                WHEN excluded.is_trending = 1 THEN excluded.trend_date
+                ELSE media_items.trend_date
+            END,
+            popularity=excluded.popularity,
+            vote_average=excluded.vote_average
+    ''', rows)
+    conn.commit()
+    conn.close()
+    return rows
+
+def _set_config_values(values):
+    conn = get_db()
+    cursor = conn.cursor()
+    cursor.executemany(
+        "REPLACE INTO system_configs (config_key, config_value) VALUES (?, ?)",
+        list(values.items())
+    )
+    conn.commit()
+    conn.close()
 
 # ==================== 115网盘模块 ====================
 async def check_115_existing_quality(cookie: str, title: str):
@@ -113,151 +193,165 @@ async def push_to_aliyun(refresh_token: str, share_url: str, passcode: str = "",
     if not refresh_token: return False, "未配置阿里云盘 Refresh Token"
     match = re.search(r'/s/([a-zA-Z0-9]+)', share_url)
     if not match: return False, "无法解析阿里云盘分享链接"
-    share_id = match.group(1)
     clean_save_dir = save_dir.split('-')[0].strip() if save_dir else "root"
 
-    async with httpx.AsyncClient(timeout=20.0) as client:
-        try:
-            refresh_res = await client.post("https://api.aliyundrive.com/token/refresh", json={"refresh_token": refresh_token})
-            refresh_data = refresh_res.json()
-            if "access_token" not in refresh_data: return False, "Token 刷新失败"
-            access_token = refresh_data["access_token"]
-            drive_id = refresh_data.get("default_drive_id")
-            auth_header = {"Authorization": f"Bearer {access_token}"}
-            
-            st_res = await client.post("https://api.aliyundrive.com/v2/share_link/get_share_token", json={"share_id": share_id, "share_pwd": passcode})
-            share_token = st_res.json().get("share_token")
-            if not share_token: return False, "获取 Share Token 失败"
-
-            info_res = await client.post(f"https://api.aliyundrive.com/adrive/v3/share_link/get_share_by_anonymous?share_id={share_id}", json={"share_id": share_id}, headers=auth_header)
-            file_infos = info_res.json().get("file_infos", [])
-            if not file_infos: return False, "分享链接内无文件"
-            
-            requests_list = []
-            idx = 0
-            for f in file_infos:
-                fname = f.get("name", "").lower()
-                is_folder = f.get("type") == 'folder'
-                if is_folder or fname.endswith(VALID_VIDEO_EXTS):
-                    requests_list.append({
-                        "body": {"file_id": f["file_id"], "share_id": share_id, "auto_rename": True, "to_parent_file_id": clean_save_dir, "to_drive_id": drive_id},
-                        "headers": {"Content-Type": "application/json"}, "id": str(idx), "method": "POST", "url": "/file/copy"
-                    })
-                    idx += 1
-            
-            if not requests_list: return False, "分享链接内未找到视频格式文件 (可能为压缩包或无关引流文件)"
-                
-            batch_res = await client.post("https://api.aliyundrive.com/adrive/v2/batch", json={"requests": requests_list, "resource": "file"}, headers={"Authorization": f"Bearer {access_token}", "x-share-token": share_token})
-            if batch_res.status_code in [200, 202]: return True, "阿里云盘文件极速转存成功"
-            else: return False, "阿里云盘转存被拒绝"
-        except Exception as e: return False, f"阿里云盘 API 异常: {str(e)}"
+    try:
+        from aliyun_drive_mobile import AliyunDrive
+        api = AliyunDrive(refresh_token)
+        return await api.save_share(share_url, passcode, clean_save_dir)
+    except Exception as e:
+        return False, f"阿里云盘 API 异常: {str(e)}"
 
 # ==================== TMDB 数据采集 ====================
-# 增加 mode 参数，精确区分“只采前10页热门”和“首次补全500页基础库”
+# mode 支持：trending / movie / tv / base / all
 async def sync_tmdb_data(force=False, mode="all"):
     config = get_sys_config()
     api_key = config.get('api_key')
-    
-    if not api_key: 
+
+    if not api_key:
         add_log("WARNING", "【库同步】跳过：未配置 TMDB API Key。")
         return
 
     today_str = datetime.date.today().isoformat()
-    # 如果不是强制且今天已同步，并且是全量日常定时任务，则跳过
-    if not force and config.get('last_sync_date') == today_str and mode == "all": 
-        return 
+    base_url = config.get('api_domain', 'https://api.tmdb.org').rstrip('/')
 
     conn = get_db()
-    count = conn.execute("SELECT COUNT(*) FROM media_items").fetchone()[0]
+    counts = {
+        "movie": conn.execute("SELECT COUNT(*) FROM media_items WHERE media_type='movie'").fetchone()[0],
+        "tv": conn.execute("SELECT COUNT(*) FROM media_items WHERE media_type='tv'").fetchone()[0],
+    }
     conn.close()
 
-    base_url = config.get('api_domain', 'https://api.tmdb.org').rstrip('/')
-    items = []
+    if not force and mode == "all" and config.get('last_sync_date') == today_str:
+        if counts["movie"] >= TMDB_BASE_MIN_COUNT and counts["tv"] >= TMDB_BASE_MIN_COUNT:
+            return
 
-    async with httpx.AsyncClient(timeout=30.0) as client:
+    async def fetch_json(client, path, params):
         try:
-            # 1. 【今日热门】模式：只采集前 10 页
-            if mode in ["all", "trending"]:
-                add_log("INFO", f"【库同步】开始极速抓取今日新增热门趋势 (前 10 页)...")
-                
-                async def fetch_trend(m_type, window, page):
-                    try:
-                        url = f"{base_url}/3/trending/{m_type}/{window}"
-                        r = await client.get(url, params={"api_key": api_key, "language": "zh-CN", "page": page})
-                        if r.status_code == 200:
-                            res_data = r.json().get('results', [])
-                            for m in res_data: m['media_type'] = m_type
-                            return res_data
-                    except Exception: pass
-                    return []
-
-                trend_tasks = []
-                for w in ['day']:
-                    for t in ['movie', 'tv']:
-                        for p in range(1, 11): 
-                            trend_tasks.append(fetch_trend(t, w, p))
-                
-                trend_results = await asyncio.gather(*trend_tasks)
-                for res_arr in trend_results:
-                    items.extend(res_arr)
-
-            # 2. 【基础库】模式：首次部署库数据不足时，采集500页。一旦饱满永远不再执行。
-            if count < 15000 and mode in ["all", "base"]:
-                add_log("INFO", f"【库同步】历史库数据不足({count}条)，启动并发大补全(电影/剧集各500页)...")
-                sem = asyncio.Semaphore(15) 
-                async def fetch_page(m_type, page):
-                    async with sem:
-                        try:
-                            res = await client.get(f"{base_url}/3/{m_type}/popular", params={"api_key": api_key, "language": "zh-CN", "page": page})
-                            if res.status_code == 200:
-                                res_items = res.json().get('results', [])
-                                for r in res_items: r['media_type'] = m_type
-                                return res_items
-                        except Exception: pass
-                        return []
-
-                tasks_m = [fetch_page('movie', p) for p in range(1, 501)]
-                for i in range(0, 500, 100):
-                    res_list = await asyncio.gather(*tasks_m[i:i+100])
-                    for r in res_list: items.extend(r)
-                    add_log("INFO", f"【库同步】电影库已处理 {min(i+100, 500)} 页...")
-
-                tasks_t = [fetch_page('tv', p) for p in range(1, 501)]
-                for i in range(0, 500, 100):
-                    res_list = await asyncio.gather(*tasks_t[i:i+100])
-                    for r in res_list: items.extend(r)
-                    add_log("INFO", f"【库同步】剧集库已处理 {min(i+100, 500)} 页...")
-
-            unique_items = {item['id']: item for item in items if item.get('id')}.values()
-            if not unique_items: return
-
-            insert_data = []
-            for item in unique_items:
-                title = item.get('title') or item.get('name')
-                poster = item.get('poster_path')
-                if not title or not poster: continue
-                insert_data.append((item['id'], item.get('media_type', 'movie'), title, item.get('overview', ''), poster, today_str))
-
-            conn = get_db()
-            cursor = conn.cursor()
-            cursor.executemany('''INSERT OR REPLACE INTO media_items (tmdb_id, media_type, title, overview, poster_path, add_date) VALUES (?, ?, ?, ?, ?, ?)''', insert_data)
-            
-            # 只有全量同步时才刷新今日的同步状态标识
-            if mode == "all":
-                cursor.execute("REPLACE INTO system_configs (config_key, config_value) VALUES ('last_sync_date', ?)", (today_str,))
-            
-            # 【防止自动订阅爆炸】只有日常定时更新（库已满）且抓取了每日热点时，才将当天的数据丢入自动订阅。
-            if count >= 15000 and config.get('auto_subscribe_new') == '1' and mode in ["all", "trending"]:
-                target_drive = config.get('auto_subscribe_drive', '115')
-                sub_data = [(item[0], target_drive) for item in insert_data]
-                cursor.executemany("INSERT OR IGNORE INTO subscriptions (tmdb_id, status, drive_type) VALUES (?, 'pending', ?)", sub_data)
-                add_log("INFO", f"【自动订阅】功能开启！已成功将 {len(sub_data)} 部趋势影视加入待搜刮队列，目标：{target_drive}。")
-
-            conn.commit()
-            conn.close()
-            add_log("INFO", f"【库同步】执行完毕 (模式: {mode})，系统运转流畅！")
+            res = await client.get(f"{base_url}{path}", params=params)
+            if res.status_code == 200:
+                return res.json().get('results', [])
+            add_log("WARNING", f"【库同步】TMDB 请求失败: {path} HTTP {res.status_code}")
         except Exception as e:
-            add_log("ERROR", f"【库同步】严重异常: {str(e)}")
+            add_log("WARNING", f"【库同步】TMDB 请求异常: {path} -> {str(e)}")
+        return []
+
+    async def sync_trending(client):
+        lock = _tmdb_sync_locks["trending"]
+        if lock.locked():
+            add_log("INFO", "【今日热门】已有采集任务运行中，本次跳过重复触发。")
+            return []
+
+        async with lock:
+            fresh_config = get_sys_config()
+            if not force and fresh_config.get('last_trending_sync_date') == today_str:
+                add_log("INFO", "【今日热门】今日已采集完成，跳过重复请求。")
+                return []
+
+            add_log("INFO", f"【今日热门】开始采集电影/剧集日趋势，各 {TMDB_TRENDING_PAGES} 页...")
+            tasks = []
+            for m_type in ['movie', 'tv']:
+                for page_no in range(1, TMDB_TRENDING_PAGES + 1):
+                    tasks.append(fetch_json(
+                        client,
+                        f"/3/trending/{m_type}/day",
+                        {"api_key": api_key, "language": "zh-CN", "page": page_no}
+                    ))
+
+            results = await asyncio.gather(*tasks)
+            items = []
+            for idx, result in enumerate(results):
+                m_type = 'movie' if idx < TMDB_TRENDING_PAGES else 'tv'
+                for item in result:
+                    item['media_type'] = m_type
+                    items.append(item)
+
+            rows = _upsert_media_items(items, today_str, is_trending=True)
+            _set_config_values({"last_trending_sync_date": today_str})
+            add_log("SUCCESS", f"【今日热门】采集完成，新增/更新 {len(rows)} 条热门影视。")
+            return rows
+
+    async def sync_media_type(client, m_type):
+        lock = _tmdb_sync_locks[m_type]
+        if lock.locked():
+            add_log("INFO", f"【{m_type}库】已有补全任务运行中，本次跳过重复触发。")
+            return 0
+
+        async with lock:
+            fresh_config = get_sys_config()
+            if not force and fresh_config.get(f'last_{m_type}_sync_date') == today_str and counts[m_type] >= TMDB_BASE_MIN_COUNT:
+                add_log("INFO", f"【{m_type}库】今日已补全且数量充足，跳过重复采集。")
+                return 0
+
+            add_log("INFO", f"【{m_type}库】开始补全热门基础库，共 {TMDB_BASE_PAGES} 页，并发 {TMDB_CONCURRENCY}。")
+            total_rows = 0
+            sem = asyncio.Semaphore(TMDB_CONCURRENCY)
+
+            async def fetch_page(page_no):
+                async with sem:
+                    result = await fetch_json(
+                        client,
+                        f"/3/{m_type}/popular",
+                        {"api_key": api_key, "language": "zh-CN", "page": page_no}
+                    )
+                    for item in result:
+                        item['media_type'] = m_type
+                    return result
+
+            for start in range(1, TMDB_BASE_PAGES + 1, TMDB_BATCH_SIZE):
+                end = min(start + TMDB_BATCH_SIZE - 1, TMDB_BASE_PAGES)
+                batch_results = await asyncio.gather(*[fetch_page(page_no) for page_no in range(start, end + 1)])
+                batch_items = [item for result in batch_results for item in result]
+                rows = _upsert_media_items(batch_items, today_str, is_trending=False)
+                total_rows += len(rows)
+                add_log("INFO", f"【{m_type}库】已处理 {end}/{TMDB_BASE_PAGES} 页，累计写入 {total_rows} 条。")
+
+            _set_config_values({f"last_{m_type}_sync_date": today_str})
+            add_log("SUCCESS", f"【{m_type}库】补全完成，累计新增/更新 {total_rows} 条。")
+            return total_rows
+
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            trending_rows = []
+            if mode in ["all", "trending"]:
+                trending_rows = await sync_trending(client)
+
+            target_types = []
+            if mode in ["all", "base"]:
+                if force or counts["movie"] < TMDB_BASE_MIN_COUNT:
+                    target_types.append("movie")
+                if force or counts["tv"] < TMDB_BASE_MIN_COUNT:
+                    target_types.append("tv")
+            elif mode in ["movie", "tv"]:
+                target_types.append(mode)
+
+            for target_type in target_types:
+                await sync_media_type(client, target_type)
+
+            values = {}
+            if mode == "all":
+                values["last_sync_date"] = today_str
+            if target_types:
+                values["last_base_sync_date"] = today_str
+            if values:
+                _set_config_values(values)
+
+            if trending_rows and config.get('auto_subscribe_new') == '1':
+                target_drive = config.get('auto_subscribe_drive', '115')
+                conn = get_db()
+                cursor = conn.cursor()
+                sub_data = [(row[0], target_drive) for row in trending_rows]
+                cursor.executemany(
+                    "INSERT OR IGNORE INTO subscriptions (tmdb_id, status, drive_type) VALUES (?, 'pending', ?)",
+                    sub_data
+                )
+                conn.commit()
+                conn.close()
+                add_log("INFO", f"【自动订阅】已将 {len(sub_data)} 部今日热门加入待搜刮队列，目标：{target_drive}。")
+
+            add_log("INFO", f"【库同步】执行完毕 (模式: {mode})。")
+    except Exception as e:
+        add_log("ERROR", f"【库同步】严重异常: {str(e)}")
 
 # ==================== 调度主循环 ====================
 async def auto_subscription_task():

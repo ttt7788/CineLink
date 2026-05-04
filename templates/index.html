@@ -9,7 +9,7 @@
     <script src="/static/lib/index.full.min.js"></script>
     <script src="/static/lib/axios.min.js"></script>
     <script src="/static/lib/index.iife.min.js"></script>
-    <link rel="stylesheet" href="/static/style.css?v=2.0.7" />
+    <link rel="stylesheet" href="/static/style.css?v=2.0.12" />
     <style> 
         .el-dropdown { vertical-align: middle; margin-right: 5px; } 
         .form-tip { font-size: 12px; color: #888; margin-top: 5px; line-height: 1.4; }
@@ -24,41 +24,45 @@
 <body>
     <div id="app">
         <el-container style="height: 100vh;">
-            <el-header style="background-color: #1f2d3d; color: white; height: 65px; display: flex; justify-content: space-between; align-items: center; padding: 0 20px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); z-index: 10;">
-                <div style="font-size: 20px; font-weight: bold; display: flex; align-items: center; letter-spacing: 1px;">🎬 CineLink 云幕智链</div>
-                <div style="display: flex; align-items: center; gap: 15px;">
+            <el-header class="app-header">
+                <div class="brand-lockup">
+                    <el-icon><video-camera-filled></video-camera-filled></el-icon>
+                    <span>CineLink</span>
+                    <small>云幕智链</small>
+                </div>
+                <div class="header-tools">
                     <div class="cron-widget">
                         <el-icon style="margin-right: 6px; font-size: 18px; color: #409EFF;"><Timer></Timer></el-icon>
-                        <span style="font-size: 14px; margin-right: 10px; color: #bfcbd9;">订阅搜刮调度</span>
-                        <el-tooltip content="格式: 分 时 日 月 周。保存后需重启生效" placement="bottom">
+                        <span style="font-size: 14px; margin-right: 10px; color: #bfcbd9;">搜刮调度</span>
+                        <el-tooltip content="Cron 格式：分 时 日 月 周，保存后重启生效" placement="bottom">
                             <el-input v-model="config.cron_expression" size="small" style="width: 120px;" placeholder="*/30 * * * *"></el-input>
                         </el-tooltip>
                         <el-button type="primary" size="small" circle @click="saveConfig" style="margin-left: 8px; border-radius: 50%;"><el-icon><Check></Check></el-icon></el-button>
                     </div>
-                    <el-button type="warning" @click="runTaskManual" style="font-weight: bold; border-radius: 20px; padding: 8px 20px; box-shadow: 0 2px 8px rgba(0,0,0,0.3);">🚀 立即触发搜刮</el-button>
+                    <el-button type="warning" @click="runTaskManual" class="header-action"><el-icon><Promotion></Promotion></el-icon>立即搜刮</el-button>
                 </div>
             </el-header>
             
             <el-container>
-                <el-aside width="220px">
-                    <el-menu background-color="#304156" text-color="#bfcbd9" active-text-color="#409EFF" :default-active="activeMenu" @select="handleMenuSelect">
+                <el-aside width="236px">
+                    <el-menu class="side-menu" background-color="#263445" text-color="#c3ccd9" active-text-color="#ffffff" :default-active="activeMenu" @select="handleMenuSelect">
                         
                         <el-sub-menu index="m1">
                             <template #title>
                                 <el-icon><Compass></Compass></el-icon>
-                                <span>热门发现</span>
+                                <span>发现资源</span>
                             </template>
                             <el-menu-item index="hot">
-                                <el-icon><Flame></Flame></el-icon>
+                                <el-icon><trend-charts></trend-charts></el-icon>
                                 <template #title>今日热门</template>
                             </el-menu-item>
                             <el-menu-item index="movie">
                                 <el-icon><Film></Film></el-icon>
-                                <template #title>全部电影库</template>
+                                <template #title>电影库</template>
                             </el-menu-item>
                             <el-menu-item index="tv">
                                 <el-icon><Monitor></Monitor></el-icon>
-                                <template #title>全部剧集库</template>
+                                <template #title>剧集库</template>
                             </el-menu-item>
                             <el-menu-item index="discover">
                                 <el-icon><Search></Search></el-icon>
@@ -67,50 +71,54 @@
                         </el-sub-menu>
 
                         <el-menu-item index="subscriptions">
-                            <el-icon><List></List></el-icon>
-                            <template #title>我的订阅流</template>
+                            <el-icon><Tickets></Tickets></el-icon>
+                            <template #title>订阅队列</template>
                         </el-menu-item>
                         
                         <el-menu-item index="records">
-                            <el-icon><Collection></Collection></el-icon>
-                            <template #title>推送成功库</template>
+                            <el-icon><circle-check></circle-check></el-icon>
+                            <template #title>转存记录</template>
                         </el-menu-item>
                         
                         <el-sub-menu index="m_drive">
                             <template #title>
-                                <el-icon><Files></Files></el-icon>
-                                <span>网盘文件管理</span>
+                                <el-icon><folder-opened></folder-opened></el-icon>
+                                <span>网盘文件</span>
                             </template>
                             <el-menu-item index="drive_quark">
-                                <el-icon><Cloudy></Cloudy></el-icon>
+                                <el-icon><Box></Box></el-icon>
                                 <template #title>夸克网盘</template>
                             </el-menu-item>
                             <el-menu-item index="drive_aliyun">
                                 <el-icon><Cloudy></Cloudy></el-icon>
                                 <template #title>阿里云盘</template>
                             </el-menu-item>
+                            <el-menu-item index="drive_115">
+                                <el-icon><Files></Files></el-icon>
+                                <template #title>115网盘</template>
+                            </el-menu-item>
                         </el-sub-menu>
 
                         <el-sub-menu index="m_strm">
                             <template #title>
                                 <el-icon><Connection></Connection></el-icon>
-                                <span>STRM 挂载矩阵</span>
+                                <span>STRM 管理</span>
                             </template>
                             <el-menu-item index="strm_configs">
                                 <el-icon><Share></Share></el-icon>
-                                <template #title>WebDAV 节点配置</template>
+                                <template #title>节点配置</template>
                             </el-menu-item>
                             <el-menu-item index="strm_records">
-                                <el-icon><DocumentChecked></DocumentChecked></el-icon>
-                                <template #title>STRM 生成记录</template>
+                                <el-icon><document-checked></document-checked></el-icon>
+                                <template #title>生成记录</template>
                             </el-menu-item>
                             <el-menu-item index="strm_tasks">
-                                <el-icon><AlarmClock></AlarmClock></el-icon>
-                                <template #title>自动化定时调度</template>
+                                <el-icon><alarm-clock></alarm-clock></el-icon>
+                                <template #title>定时任务</template>
                             </el-menu-item>
                             <el-menu-item index="strm_settings">
-                                <el-icon><SetUp></SetUp></el-icon>
-                                <template #title>生成规则与工具</template>
+                                <el-icon><set-up></set-up></el-icon>
+                                <template #title>规则工具</template>
                             </el-menu-item>
                         </el-sub-menu>
 
@@ -120,21 +128,21 @@
                                 <span>系统设置</span>
                             </template>
                             <el-menu-item index="settings">
-                                <el-icon><Filter></Filter></el-icon>
-                                <template #title>搜刮源配置</template>
+                                <el-icon><Operation></Operation></el-icon>
+                                <template #title>搜刮配置</template>
                             </el-menu-item>
                             <el-menu-item index="settings_115">
-                                <el-icon><Coin></Coin></el-icon>
-                                <template #title>网盘与终端节点</template>
+                                <el-icon><Key></Key></el-icon>
+                                <template #title>网盘授权</template>
                             </el-menu-item>
                             <el-menu-item index="logs">
                                 <el-icon><Document></Document></el-icon>
-                                <template #title>系统日志</template>
+                                <template #title>运行日志</template>
                             </el-menu-item>
                         </el-sub-menu>
 
                         <el-menu-item index="about">
-                            <el-icon><InfoFilled></InfoFilled></el-icon>
+                            <el-icon><info-filled></info-filled></el-icon>
                             <template #title>关于系统</template>
                         </el-menu-item>
 
@@ -156,7 +164,7 @@
                             <el-button type="primary" @click="searchTMDB">精准搜索</el-button>
                         </div>
                         <div v-if="selectedMediaList.length > 0" class="batch-toolbar">
-                            <span style="color: #67c23a; font-weight: bold; font-size: 16px;"><el-icon style="vertical-align: middle;"><CircleCheckFilled></CircleCheckFilled></el-icon> 已选中 {{ selectedMediaList.length }} 部影视</span>
+                            <span style="color: #67c23a; font-weight: bold; font-size: 16px;"><el-icon style="vertical-align: middle;"><circle-check-filled></circle-check-filled></el-icon> 已选中 {{ selectedMediaList.length }} 部影视</span>
                             <el-dropdown split-button type="success" @click="batchSubscribe('115')" @command="batchSubscribe">
                                 批量订阅至 115网盘
                                 <template #dropdown>
@@ -202,10 +210,10 @@
                         </div>
                     </div>
 
-                    <div v-if="['drive_quark', 'drive_aliyun'].includes(activeMenu)">
+                    <div v-if="['drive_quark', 'drive_aliyun', 'drive_115'].includes(activeMenu)">
                         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
-                            <h2 style="margin: 0;">{{ activeMenu === 'drive_quark' ? '☁️ 夸克网盘管理' : '☁️ 阿里云盘管理' }}</h2>
-                            <el-button type="primary" @click="promptMkdir"><el-icon style="margin-right: 5px;"><FolderAdd></FolderAdd></el-icon>新建文件夹</el-button>
+                            <h2 style="margin: 0;">{{ activeMenu === 'drive_quark' ? '夸克网盘管理' : (activeMenu === 'drive_aliyun' ? '阿里云盘管理' : '115网盘管理') }}</h2>
+                            <el-button type="primary" @click="promptMkdir"><el-icon style="margin-right: 5px;"><folder-add></folder-add></el-icon>新建文件夹</el-button>
                         </div>
                         <div class="drive-breadcrumb">
                             <el-breadcrumb separator="/">
@@ -223,7 +231,15 @@
                             </el-table-column>
                             <el-table-column label="大小" width="120"><template #default="s"><span v-if="s.row.is_folder">-</span><span v-else>{{ formatFileSize(s.row.size) }}</span></template></el-table-column>
                             <el-table-column prop="updated_at" label="修改时间" width="180"></el-table-column>
-                            <el-table-column label="操作" width="160"><template #default="s"><el-button type="primary" size="small" plain @click="promptRename(s.row)">重命名</el-button><el-button type="danger" size="small" plain @click="deleteDriveFile(s.row)">删除</el-button></template></el-table-column>
+                            <el-table-column label="操作" width="180">
+                                <template #default="s">
+                                    <template v-if="currentDriveType !== '115'">
+                                        <el-button type="primary" size="small" plain @click="promptRename(s.row)">重命名</el-button>
+                                        <el-button type="danger" size="small" plain @click="deleteDriveFile(s.row)">删除</el-button>
+                                    </template>
+                                    <el-tag v-else type="info">115只读</el-tag>
+                                </template>
+                            </el-table-column>
                         </el-table>
                     </div>
 
@@ -258,14 +274,14 @@
                     </div>
 
                     <div v-if="activeMenu==='settings'" class="settings-wrapper">
-                        <h2>⚙️ TMDB与盘搜源配置</h2>
+                        <h2>TMDB 与盘搜源配置</h2>
                         <el-card shadow="never">
                             <el-form label-width="130px" label-position="top">
                                 <el-form-item><template #label><strong>TMDB API Key</strong></template><el-input v-model="config.api_key"></el-input></el-form-item>
                                 <el-form-item><template #label><strong>本地盘搜 API 接口地址</strong></template><el-input v-model="config.pansou_domain"></el-input></el-form-item>
                                 
                                 <el-form-item>
-                                    <template #label><strong>🎬 自动订阅今日新增趋势</strong></template>
+                                    <template #label><strong>自动订阅今日新增趋势</strong></template>
                                     <div style="display: flex; align-items: center; gap: 20px;">
                                         <el-switch v-model="config.auto_subscribe_new" active-value="1" inactive-value="0" active-text="开启自动订阅" inactive-text="关闭"></el-switch>
                                         <el-select v-model="config.auto_subscribe_drive" placeholder="请选择默认入库网盘" style="width: 150px;" v-if="config.auto_subscribe_new === '1'">
@@ -286,7 +302,29 @@
                         <h2>☁️ 网盘资产与终端节点配置</h2>
                         <el-tabs type="border-card" model-value="quark" style="min-height: 400px; box-shadow: none;">
                             <el-tab-pane label="☁️ 夸克网盘" name="quark"><div style="max-width: 800px; padding: 10px;"><el-form label-position="top"><el-form-item><template #label><strong>夸克 Cookie (必填)</strong></template><el-input v-model="config.cookie_quark" type="textarea" :rows="4"></el-input></el-form-item><el-form-item><template #label><strong>专属转存目录 ID (选填)</strong></template><el-input v-model="config.quark_save_dir"></el-input></el-form-item><el-form-item style="margin-top: 30px;"><el-button type="primary" @click="saveConfig" size="large">保存夸克配置</el-button></el-form-item></el-form></div></el-tab-pane>
-                            <el-tab-pane label="☁️ 阿里云盘" name="aliyun"><div style="max-width: 800px; padding: 10px;"><el-form label-position="top"><el-form-item><template #label><strong>阿里云 Refresh Token (必填)</strong></template><el-input v-model="config.token_aliyun" type="textarea" :rows="3"></el-input></el-form-item><el-form-item><template #label><strong>专属转存目录 ID (选填)</strong></template><el-input v-model="config.aliyun_save_dir"></el-input></el-form-item><el-form-item style="margin-top: 30px;"><el-button type="primary" @click="saveConfig" size="large">保存阿里云配置</el-button></el-form-item></el-form></div></el-tab-pane>
+                            <el-tab-pane label="☁️ 阿里云盘" name="aliyun">
+                                <div style="max-width: 800px; padding: 10px;">
+                                    <el-form label-position="top">
+                                        <el-form-item>
+                                            <template #label><strong>阿里云盘移动端 Refresh Token</strong></template>
+                                            <el-input v-model="config.token_aliyun" type="textarea" :rows="3"></el-input>
+                                        </el-form-item>
+                                        <div style="margin: 20px 0; text-align: center; border: 1px dashed #dcdfe6; border-radius: 8px; padding: 20px;">
+                                            <el-button type="success" @click="generateAliyunQrCode" :loading="aliyunQrLoading" size="large">扫码自动获取移动端 Refresh Token</el-button>
+                                            <div v-if="aliyunQrUrl" style="margin-top:20px;">
+                                                <img :src="aliyunQrUrl" class="qr-img">
+                                                <h3 :style="{color: aliyunQrStatus.includes('成功')?'#67C23A':'#409EFF'}">{{aliyunQrStatus}}</h3>
+                                            </div>
+                                            <div v-else-if="aliyunQrStatus" style="margin-top: 12px; color: #606266;">{{aliyunQrStatus}}</div>
+                                        </div>
+                                        <el-form-item>
+                                            <template #label><strong>专属转存目录 ID (选填)</strong></template>
+                                            <el-input v-model="config.aliyun_save_dir"></el-input>
+                                        </el-form-item>
+                                        <el-form-item style="margin-top: 30px;"><el-button type="primary" @click="saveConfig" size="large">保存阿里云配置</el-button></el-form-item>
+                                    </el-form>
+                                </div>
+                            </el-tab-pane>
                             <el-tab-pane label="☁️ 115网盘" name="115"><div style="max-width: 800px; padding: 10px;"><el-form label-position="top"><el-form-item><template #label><strong>115 Cookie</strong></template><el-input v-model="config.cookie_115" type="textarea" :rows="3" disabled></el-input></el-form-item><div style="margin-top: 30px; text-align: center;"><el-button type="primary" @click="generate115QrCode" :loading="qrLoading" size="large">生成二维码</el-button><div v-if="qUrl" style="margin-top:20px;"><img :src="qUrl" class="qr-img"><h3 :style="{color: qSt.includes('✅')?'#67C23A':'#409EFF'}">{{qSt}}</h3></div></div></el-form></div></el-tab-pane>
                             <el-tab-pane label="🔗 CMS 终端节点" name="cms"><div style="max-width: 800px; padding: 10px;"><el-form label-position="top"><el-form-item><template #label><strong>CMS API 地址</strong></template><el-input v-model="config.cms_api_url"></el-input></el-form-item><el-form-item><template #label><strong>CMS Token 认证</strong></template><el-input v-model="config.cms_api_token" type="password" show-password></el-input></el-form-item><el-form-item style="margin-top: 30px;"><el-button type="primary" @click="saveConfig" size="large">保存 CMS 配置</el-button></el-form-item></el-form></div></el-tab-pane>
                         </el-tabs>
@@ -316,7 +354,7 @@
             </el-container>
         </el-container>
         
-        <el-dialog v-model="pv" :title="'🔍 全网盘搜结果: '+curKw" width="80%" v-loading="savingLink">
+        <el-dialog v-model="pv" :title="'全网盘搜结果：'+curKw" width="80%" v-loading="savingLink">
             <el-tabs v-if="Object.keys(pr).length">
                 <el-tab-pane v-for="(links, type) in pr" :key="type" :label="type.toUpperCase()+' ('+links.length+')'">
                     <el-table :data="links" height="400">
@@ -331,7 +369,7 @@
         </el-dialog>
     </div>
     
-    <script src="/static/useStrm.js?v=2.0.7"></script>
-    <script src="/static/app.js?v=2.0.7"></script>
+    <script src="/static/useStrm.js?v=2.0.12"></script>
+    <script src="/static/app.js?v=2.0.12"></script>
 </body>
 </html>

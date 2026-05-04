@@ -21,15 +21,26 @@
 
     <el-dialog v-model="showStrmDialog" :title="isEditingConfig ? '编辑节点' : '新增 WebDAV 节点'" width="600px" top="5vh">
         <el-form label-position="top">
+            <el-form-item label="节点来源">
+                <el-radio-group v-model="newStrmConfig.source_type" @change="applyStrmSourceType">
+                    <el-radio-button label="webdav">外部 WebDAV</el-radio-button>
+                    <el-radio-button label="115_internal">内置115网盘</el-radio-button>
+                    <el-radio-button label="aliyun_internal">内置阿里云盘</el-radio-button>
+                    <el-radio-button label="quark_internal">内置夸克网盘</el-radio-button>
+                </el-radio-group>
+            </el-form-item>
             <el-row :gutter="20">
                 <el-col :span="12"><el-form-item label="节点名称 (如: 115云盘)"><el-input v-model="newStrmConfig.config_name"></el-input></el-form-item></el-col>
-                <el-col :span="12"><el-form-item label="云端根目录 (如: /dav/115)"><el-input v-model="newStrmConfig.rootpath"></el-input></el-form-item></el-col>
+                <el-col :span="12"><el-form-item label="云端根目录 (如: /dav/115)"><el-input v-model="newStrmConfig.rootpath" :disabled="newStrmConfig.source_type !== 'webdav'"></el-input></el-form-item></el-col>
             </el-row>
-            <el-form-item label="WebDAV URL (含协议端口)"><el-input v-model="newStrmConfig.url" placeholder="http://192.168.1.100:5244"></el-input></el-form-item>
-            <el-row :gutter="20">
+            <el-form-item label="WebDAV URL (含协议端口)"><el-input v-model="newStrmConfig.url" placeholder="http://192.168.1.100:5244" :disabled="newStrmConfig.source_type !== 'webdav'"></el-input></el-form-item>
+            <el-row :gutter="20" v-if="newStrmConfig.source_type === 'webdav'">
                 <el-col :span="12"><el-form-item label="账号"><el-input v-model="newStrmConfig.username"></el-input></el-form-item></el-col>
                 <el-col :span="12"><el-form-item label="密码"><el-input v-model="newStrmConfig.password" type="password"></el-input></el-form-item></el-col>
             </el-row>
+            <el-alert v-if="newStrmConfig.source_type === 'aliyun_internal'" type="info" :closable="false" show-icon title="将使用系统中已配置的阿里云 Refresh Token，并通过 http://127.0.0.1:8088/aliyun 生成 STRM。"></el-alert>
+            <el-alert v-if="newStrmConfig.source_type === 'quark_internal'" type="info" :closable="false" show-icon title="将使用系统中已配置的夸克 Cookie，并通过 http://127.0.0.1:8088/quark 生成 STRM。"></el-alert>
+            <el-alert v-if="newStrmConfig.source_type === '115_internal'" type="info" :closable="false" show-icon title="将使用系统中已配置的 115 Cookie，并通过 http://127.0.0.1:8088/115 生成 STRM。"></el-alert>
             <el-form-item label="本地目标挂载物理目录"><el-input v-model="newStrmConfig.target_directory" placeholder="/data/media/115"></el-input></el-form-item>
             
             <el-divider content-position="left">高级比对与防风控设置</el-divider>

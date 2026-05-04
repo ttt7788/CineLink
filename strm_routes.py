@@ -9,6 +9,16 @@ from logger import add_log
 # 就是这一行缺失或未保存导致了报错
 strm_router = APIRouter()
 
+INTERNAL_WEBDAV_URL = os.environ.get("CINELINK_WEBDAV_PUBLIC_URL", "http://127.0.0.1:8088").rstrip("/")
+INTERNAL_ROOTS = {"115_internal": "/115", "aliyun_internal": "/aliyun", "quark_internal": "/quark"}
+
+
+def normalize_strm_config(config: StrmConfigModel):
+    source_type = config.source_type or "webdav"
+    if source_type in INTERNAL_ROOTS:
+        return source_type, INTERNAL_WEBDAV_URL, "", "", INTERNAL_ROOTS[source_type]
+    return source_type, config.url, config.username, config.password, config.rootpath
+
 @strm_router.get("/api/strm/configs")
 def get_strm_configs():
     conn = get_db()
@@ -19,25 +29,27 @@ def get_strm_configs():
 @strm_router.post("/api/strm/configs")
 def add_strm_config(config: StrmConfigModel):
     conn = get_db()
-    conn.execute('''INSERT INTO strm_configs 
-        (config_name, url, username, password, rootpath, target_directory, download_enabled, update_mode, download_interval_range) 
-        VALUES (?,?,?,?,?,?,?,?,?)''', 
-        (config.config_name, config.url, config.username, config.password, config.rootpath, 
+    source_type, url, username, password, rootpath = normalize_strm_config(config)
+    conn.execute('''INSERT INTO strm_configs
+        (source_type, config_name, url, username, password, rootpath, target_directory, download_enabled, update_mode, download_interval_range)
+        VALUES (?,?,?,?,?,?,?,?,?,?)''',
+        (source_type, config.config_name, url, username, password, rootpath,
          config.target_directory, config.download_enabled, config.update_mode, config.download_interval_range))
     conn.commit(); conn.close()
-    add_log("INFO", f"🔗 新增 WebDAV 节点: [{config.config_name}] ({config.url})")
-    return {"message": "WebDAV节点添加成功"}
+    add_log("INFO", f"🔗 新增 STRM 节点: [{config.config_name}] ({source_type})")
+    return {"message": "STRM节点添加成功"}
 
 @strm_router.put("/api/strm/configs/{config_id}")
 def update_strm_config(config_id: int, config: StrmConfigModel):
     conn = get_db()
-    conn.execute('''UPDATE strm_configs SET 
-        config_name=?, url=?, username=?, password=?, rootpath=?, target_directory=?, 
-        download_enabled=?, update_mode=?, download_interval_range=? WHERE id=?''', 
-        (config.config_name, config.url, config.username, config.password, config.rootpath, 
+    source_type, url, username, password, rootpath = normalize_strm_config(config)
+    conn.execute('''UPDATE strm_configs SET
+        source_type=?, config_name=?, url=?, username=?, password=?, rootpath=?, target_directory=?,
+        download_enabled=?, update_mode=?, download_interval_range=? WHERE id=?''',
+        (source_type, config.config_name, url, username, password, rootpath,
          config.target_directory, config.download_enabled, config.update_mode, config.download_interval_range, config_id))
     conn.commit(); conn.close()
-    add_log("INFO", f"📝 修改 WebDAV 节点: [{config.config_name}] (ID: {config_id})")
+    add_log("INFO", f"📝 修改 STRM 节点: [{config.config_name}] (ID: {config_id}, 来源: {source_type})")
     return {"message": "节点配置已更新"}
 
 @strm_router.delete("/api/strm/configs/{config_id}")
@@ -86,24 +98,45 @@ def replace_domain(req: ReplaceDomainModel, background_tasks: BackgroundTasks):
     return {"message": "批量域名替换任务已投递后台。"}
 
 @strm_router.get("/api/strm/records")
-def get_strm_records(page: int = 1, size: int = 50):
+def get_strm_records(page: int = 1, size: int = 50, config_id: int = 0):
     conn = get_db()
     offset = (page - 1) * size
-    query = '''SELECT r.*, c.config_name FROM strm_records r 
-               LEFT JOIN strm_configs c ON r.config_id = c.id 
-               ORDER BY r.id DESC LIMIT ? OFFSET ?'''
-    rows = conn.execute(query, (size, offset)).fetchall()
-    total = conn.execute("SELECT COUNT(*) FROM strm_records").fetchone()[0]
+    summaries = conn.execute('''SELECT c.id, c.config_name, c.source_type, COUNT(r.id) AS record_count
+                                FROM strm_configs c
+                                LEFT JOIN strm_records r ON r.config_id = c.id
+                                GROUP BY c.id
+                                ORDER BY c.id''').fetchall()
+    where = ""
+    params = []
+    if config_id:
+        where = "WHERE r.config_id = ?"
+        params.append(config_id)
+    query = '''SELECT r.*, c.config_name FROM strm_records r
+               LEFT JOIN strm_configs c ON r.config_id = c.id
+               {where}
+               ORDER BY r.id DESC LIMIT ? OFFSET ?'''.format(where=where)
+    rows = conn.execute(query, (*params, size, offset)).fetchall()
+    total = conn.execute(f"SELECT COUNT(*) FROM strm_records r {where}", params).fetchone()[0]
     conn.close()
-    return {"items": [dict(row) for row in rows], "total": total}
+    return {
+        "items": [dict(row) for row in rows],
+        "total": total,
+        "summaries": [dict(row) for row in summaries],
+    }
 
 @strm_router.delete("/api/strm/records/clear")
-def clear_strm_records():
+def clear_strm_records(config_id: int = 0):
     conn = get_db()
-    conn.execute("DELETE FROM strm_records")
+    if config_id:
+        conn.execute("DELETE FROM strm_records WHERE config_id=?", (config_id,))
+        config = conn.execute("SELECT config_name FROM strm_configs WHERE id=?", (config_id,)).fetchone()
+        target = config["config_name"] if config else f"ID {config_id}"
+        add_log("WARNING", f"🧹 用户手动清空了 STRM 节点 [{target}] 的成功记录缓存，下次生成将重新比对。")
+    else:
+        conn.execute("DELETE FROM strm_records")
+        add_log("WARNING", "🧹 用户手动清空了全部 STRM 成功记录缓存！下次生成将执行全量比对。")
     conn.commit(); conn.close()
-    add_log("WARNING", "🧹 用户手动清空了全部 STRM 成功记录缓存！下次生成将执行全量比对。")
-    return {"message": "历史记录已全部清空"}
+    return {"message": "记录缓存已清空"}
 
 @strm_router.get("/api/strm/tasks")
 def get_strm_tasks():

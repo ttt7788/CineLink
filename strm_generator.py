@@ -2,7 +2,7 @@ import sys
 import os
 import time
 import random
-from urllib.parse import urlparse, unquote
+from urllib.parse import quote, urlparse, unquote
 import threading
 import concurrent.futures
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -10,6 +10,8 @@ import easywebdav
 
 from database import get_db
 from logger import add_log
+
+INTERNAL_SOURCE_TYPES = {'115_internal', 'aliyun_internal', 'quark_internal'}
 
 strm_file_counter = 0  
 metadata_file_counter = 0  # 【新增】元数据下载计数器
@@ -37,10 +39,13 @@ def get_webdav_config(config_id):
         min_int, max_int = map(float, str(row['download_interval_range']).split('-'))
     except:
         min_int, max_int = 1.0, 3.0
-    
+
+    source_type = row['source_type'] if 'source_type' in row.keys() and row['source_type'] else 'webdav'
+
     return {
-        'id': row['id'], 'config_name': row['config_name'], 'host': host, 'port': int(port), 
-        'username': row['username'], 'password': row['password'], 
+        'id': row['id'], 'source_type': source_type,
+        'config_name': row['config_name'], 'host': host, 'port': int(port),
+        'username': row['username'], 'password': row['password'],
         'rootpath': row['rootpath'], 'protocol': protocol,
         'target_directory': row['target_directory'], 
         'update_mode': row['update_mode'], 
@@ -66,9 +71,11 @@ def get_script_config():
     }
 
 def connect_webdav(config):
+    username = config['username'] or None
+    password = config['password'] or None
     return easywebdav.connect(
-        host=config['host'], port=config['port'], username=config['username'],
-        password=config['password'], protocol=config['protocol']
+        host=config['host'], port=config['port'], username=username,
+        password=password, protocol=config['protocol']
     )
 
 def get_webdav_client(config):
@@ -110,7 +117,7 @@ def scan_directories_concurrently(config, script_config, existing_records):
     global video_file_counter, existing_strm_file_counter, strm_tasks, metadata_tasks, dir_scan_counter
     
     root_dir = config['rootpath']
-    if not root_dir.startswith('/dav'):
+    if config.get('source_type') not in INTERNAL_SOURCE_TYPES and not root_dir.startswith('/dav'):
         root_dir = '/dav' + (root_dir if root_dir.startswith('/') else '/' + root_dir)
     if not root_dir.endswith('/'):
         root_dir += '/'
@@ -143,7 +150,7 @@ def scan_directories_concurrently(config, script_config, existing_records):
                     continue
                     
                 decoded_directory = unquote(current_dir)
-                local_relative_path = decoded_directory.replace(config['rootpath'], '').lstrip('/')
+                local_relative_path = decoded_directory.replace(config['rootpath'], '', 1).lstrip('/')
                 local_directory = os.path.join(config['target_directory'], local_relative_path)
                 os.makedirs(local_directory, exist_ok=True)
 
@@ -160,7 +167,7 @@ def scan_directories_concurrently(config, script_config, existing_records):
                         if file_extension in script_config['video_formats']:
                             with counter_lock: video_file_counter += 1
                             
-                            decoded_file_name = unquote(f.name).replace('/dav/', '')
+                            decoded_file_name = unquote(f.name)
                             strm_file_name = os.path.splitext(os.path.basename(decoded_file_name))[0] + ".strm"
                             strm_file_path = os.path.join(local_directory, strm_file_name)
                             relative_path = os.path.relpath(strm_file_path, config['target_directory'])
@@ -173,7 +180,7 @@ def scan_directories_concurrently(config, script_config, existing_records):
                         
                         # 情况二：如果是字幕/图片/NFO且开启了下载，创建真实文件下载任务
                         elif config['download_enabled'] == 1 and file_extension in meta_formats:
-                            decoded_file_name = unquote(f.name).replace('/dav/', '')
+                            decoded_file_name = unquote(f.name)
                             local_file_name = os.path.basename(decoded_file_name)
                             local_file_path = os.path.join(local_directory, local_file_name)
                             relative_path = os.path.relpath(local_file_path, config['target_directory'])
@@ -192,8 +199,12 @@ def create_strm_file(file_name, file_size, config, local_directory, relative_pat
     min_sec, max_sec = config['interval']
     time.sleep(random.uniform(min_sec, max_sec))
 
-    clean_file_name = file_name.replace('/dav', '')
-    http_link = f"{config['protocol']}://{config['host']}:{config['port']}/d{clean_file_name}"
+    if config.get('source_type') in INTERNAL_SOURCE_TYPES:
+        clean_parts = [quote(part) for part in unquote(file_name).split('/') if part]
+        http_link = f"{config['protocol']}://{config['host']}:{config['port']}/{'/'.join(clean_parts)}"
+    else:
+        clean_file_name = file_name.replace('/dav', '')
+        http_link = f"{config['protocol']}://{config['host']}:{config['port']}/d{clean_file_name}"
     strm_file_path = os.path.join(local_directory, strm_file_name)
 
     try:
