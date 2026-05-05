@@ -1,6 +1,8 @@
 services:
   cinelink:
-    build: .
+    build:
+      context: .
+      dockerfile: Dockerfile
     container_name: cinelink
     restart: unless-stopped
     ports:

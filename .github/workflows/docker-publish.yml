@@ -27,6 +27,7 @@ jobs:
         uses: docker/build-push-action@v7
         with:
           context: .
+          file: ./Dockerfile
           push: true
           # 【名称修改】自动打包生成的镜像名称改为 cinelink
           tags: |
