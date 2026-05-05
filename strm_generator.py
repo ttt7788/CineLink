@@ -2,6 +2,8 @@ import sys
 import os
 import time
 import random
+import re
+import posixpath
 from urllib.parse import quote, urlparse, unquote
 import threading
 import concurrent.futures
@@ -14,6 +16,7 @@ from logger import add_log
 INTERNAL_SOURCE_TYPES = {'115_internal', 'aliyun_internal', 'quark_internal'}
 INTERNAL_WEBDAV_URL = os.environ.get("CINELINK_WEBDAV_INTERNAL_URL", "http://127.0.0.1:8088").rstrip("/")
 INTERNAL_WEBDAV_PUBLIC_URL = os.environ.get("CINELINK_WEBDAV_PUBLIC_URL", INTERNAL_WEBDAV_URL).rstrip("/")
+DEFAULT_STRM_OUTPUT_DIR = os.environ.get("CINELINK_STRM_OUTPUT_DIR", "/data/media")
 
 strm_file_counter = 0  
 metadata_file_counter = 0  # 【新增】元数据下载计数器
@@ -73,6 +76,39 @@ def get_script_config():
         'download_threads': row['download_threads']
     }
 
+def safe_path_name(value):
+    cleaned = re.sub(r"[^\w.-]+", "_", str(value or "").strip(), flags=re.UNICODE).strip("_")
+    return cleaned or "default"
+
+def join_output_path(base, *parts):
+    if str(base).startswith("/"):
+        normalized_parts = [str(part).replace("\\", "/").strip("/") for part in parts if str(part)]
+        return posixpath.join(str(base).rstrip("/"), *normalized_parts)
+    return os.path.join(base, *parts)
+
+def normalize_target_directory(config):
+    target = str(config.get('target_directory') or "").strip()
+    source_name = str(config.get('source_type') or "webdav").replace("_internal", "")
+    fallback = join_output_path(DEFAULT_STRM_OUTPUT_DIR, safe_path_name(source_name))
+
+    if not target:
+        add_log("WARNING", f"⚠️ STRM 节点 [{config['config_name']}] 未配置本地输出目录，自动使用: {fallback}")
+        return fallback
+
+    if os.name != "nt" and (re.match(r"^[A-Za-z]:[\\/]", target) or "\\" in target):
+        add_log("WARNING", f"⚠️ STRM 节点 [{config['config_name']}] 使用了非容器路径 [{target}]，自动改用: {fallback}")
+        return fallback
+
+    if target.startswith("/"):
+        return posixpath.normpath(target)
+
+    if not os.path.isabs(target):
+        fixed = join_output_path(DEFAULT_STRM_OUTPUT_DIR, target)
+        add_log("WARNING", f"⚠️ STRM 节点 [{config['config_name']}] 输出目录不是绝对路径，自动改用: {fixed}")
+        return fixed
+
+    return target
+
 def connect_webdav(config):
     username = config['username'] or None
     password = config['password'] or None
@@ -119,6 +155,13 @@ def fetch_dir_task(directory, config):
 def scan_directories_concurrently(config, script_config, existing_records):
     global video_file_counter, existing_strm_file_counter, strm_tasks, metadata_tasks, dir_scan_counter
     
+    config['target_directory'] = normalize_target_directory(config)
+    try:
+        os.makedirs(config['target_directory'], exist_ok=True)
+    except Exception as e:
+        add_log("ERROR", f"❌ STRM 输出根目录不可用: [{config['target_directory']}] -> {e}")
+        return
+
     root_dir = config['rootpath']
     if config.get('source_type') not in INTERNAL_SOURCE_TYPES and not root_dir.startswith('/dav'):
         root_dir = '/dav' + (root_dir if root_dir.startswith('/') else '/' + root_dir)
@@ -154,8 +197,12 @@ def scan_directories_concurrently(config, script_config, existing_records):
                     
                 decoded_directory = unquote(current_dir)
                 local_relative_path = decoded_directory.replace(config['rootpath'], '', 1).lstrip('/')
-                local_directory = os.path.join(config['target_directory'], local_relative_path)
-                os.makedirs(local_directory, exist_ok=True)
+                local_directory = join_output_path(config['target_directory'], local_relative_path)
+                try:
+                    os.makedirs(local_directory, exist_ok=True)
+                except Exception as e:
+                    add_log("ERROR", f"❌ 创建 STRM 本地目录失败: [{local_directory}] -> {e}")
+                    continue
 
                 for f in result:
                     is_directory = f.name.endswith('/')
