@@ -31,6 +31,11 @@ try:
 except ValueError:
     DOWNLOAD_URL_CACHE_TTL = 300
 
+try:
+    WEBDAV_BLOCK_SIZE = int(os.environ.get("CINELINK_WEBDAV_BLOCK_SIZE", str(1024 * 1024)))
+except ValueError:
+    WEBDAV_BLOCK_SIZE = 1024 * 1024
+
 
 class DownloadUrlCache:
     def __init__(self, ttl=DOWNLOAD_URL_CACHE_TTL):
@@ -750,6 +755,7 @@ class InternalWebDavServer:
             "simple_dc": {"user_mapping": {"*": True}},
             "dir_browser": {"enable": True, "response_trailer": False},
             "lock_storage": False,
+            "block_size": WEBDAV_BLOCK_SIZE,
             "verbose": 0,
         }
         app = WsgiDAVApp(config)

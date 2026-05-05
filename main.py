@@ -9,6 +9,7 @@ from fastapi.templating import Jinja2Templates
 
 from database import init_db
 from api_routes import router
+from play_routes import play_router
 from strm_routes import strm_router
 from scheduler import auto_subscription_task
 from logger import add_log
@@ -61,6 +62,7 @@ async def background_task_loop():
         await asyncio.sleep(86400) 
 
 app.include_router(router)
+app.include_router(play_router)
 app.include_router(strm_router)
 
 if not os.path.exists("static"):

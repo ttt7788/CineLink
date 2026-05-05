@@ -16,7 +16,9 @@ from logger import add_log
 INTERNAL_SOURCE_TYPES = {'115_internal', 'aliyun_internal', 'quark_internal'}
 INTERNAL_WEBDAV_URL = os.environ.get("CINELINK_WEBDAV_INTERNAL_URL", "http://127.0.0.1:8088").rstrip("/")
 INTERNAL_WEBDAV_PUBLIC_URL = os.environ.get("CINELINK_WEBDAV_PUBLIC_URL", INTERNAL_WEBDAV_URL).rstrip("/")
+INTERNAL_PLAY_PUBLIC_URL = os.environ.get("CINELINK_PLAY_PUBLIC_URL", "http://127.0.0.1:8000").rstrip("/")
 DEFAULT_STRM_OUTPUT_DIR = os.environ.get("CINELINK_STRM_OUTPUT_DIR", "/data/media")
+INTERNAL_SOURCE_DRIVE = {"115_internal": "115", "aliyun_internal": "aliyun", "quark_internal": "quark"}
 
 strm_file_counter = 0  
 metadata_file_counter = 0  # 【新增】元数据下载计数器
@@ -251,7 +253,9 @@ def create_strm_file(file_name, file_size, config, local_directory, relative_pat
 
     if config.get('source_type') in INTERNAL_SOURCE_TYPES:
         clean_parts = [quote(part) for part in unquote(file_name).split('/') if part]
-        http_link = f"{config['public_url']}/{'/'.join(clean_parts)}"
+        drive_name = clean_parts[0] if clean_parts and clean_parts[0] in {"115", "aliyun", "quark"} else INTERNAL_SOURCE_DRIVE.get(config.get('source_type'), "")
+        rel_parts = clean_parts[1:] if clean_parts and clean_parts[0] == drive_name else clean_parts
+        http_link = f"{INTERNAL_PLAY_PUBLIC_URL}/play/{drive_name}/{'/'.join(rel_parts)}"
     else:
         clean_file_name = file_name.replace('/dav', '')
         http_link = f"{config['protocol']}://{config['host']}:{config['port']}/d{clean_file_name}"
