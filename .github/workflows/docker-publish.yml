@@ -1,9 +1,9 @@
 name: Build and Publish Docker Image
 
 on:
+  workflow_dispatch:
   push:
-    # 【核心修改】：删除了 branches 触发条件
-    # 现在只有在您发布带有 v 开头的版本标签（如 v2.0.6）时，才会触发自动打包
+    branches: ["main"]
     tags: [ 'v*.*.*' ]
 
 jobs:
