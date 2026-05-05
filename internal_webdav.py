@@ -26,6 +26,84 @@ try:
 except ValueError:
     WEBDAV_PORT = 8088
 
+try:
+    DOWNLOAD_URL_CACHE_TTL = int(os.environ.get("CINELINK_DOWNLOAD_URL_CACHE_TTL", "300"))
+except ValueError:
+    DOWNLOAD_URL_CACHE_TTL = 300
+
+
+class DownloadUrlCache:
+    def __init__(self, ttl=DOWNLOAD_URL_CACHE_TTL):
+        self.ttl = ttl
+        self.lock = threading.RLock()
+        self.items = {}
+
+    def get(self, key):
+        with self.lock:
+            cached = self.items.get(key)
+            if not cached:
+                return None
+            expires_at, url = cached
+            if expires_at < time.time():
+                self.items.pop(key, None)
+                return None
+            return url
+
+    def set(self, key, url):
+        if not url:
+            return
+        with self.lock:
+            self.items[key] = (time.time() + self.ttl, url)
+
+
+class RemoteRangeStream:
+    def __init__(self, url, headers=None, timeout=(10, 120)):
+        self.url = url
+        self.headers = dict(headers or {})
+        self.timeout = timeout
+        self.position = 0
+        self.response = None
+        self.raw = None
+
+    def seek(self, offset, whence=0):
+        if whence == 0:
+            self.position = max(0, int(offset))
+        elif whence == 1:
+            self.position = max(0, self.position + int(offset))
+        else:
+            raise OSError("RemoteRangeStream does not support seek from end")
+        if self.response:
+            self.close()
+        return self.position
+
+    def tell(self):
+        return self.position
+
+    def _open(self):
+        if self.response:
+            return
+        headers = dict(self.headers)
+        if self.position > 0:
+            headers["Range"] = f"bytes={self.position}-"
+        self.response = requests.get(self.url, headers=headers, stream=True, timeout=self.timeout)
+        self.response.raise_for_status()
+        if self.position > 0 and self.response.status_code != 206:
+            self.response.close()
+            raise RuntimeError("Remote server ignored Range request")
+        self.raw = self.response.raw
+
+    def read(self, size=-1):
+        self._open()
+        data = self.raw.read(size)
+        self.position += len(data or b"")
+        return data
+
+    def close(self):
+        if self.response:
+            self.response.close()
+        self.response = None
+        self.raw = None
+
 
 class ThreadingWsgiServer(ThreadingMixIn, WSGIServer):
     daemon_threads = True
@@ -85,6 +163,7 @@ class AliyunWebDavProvider(DAVProvider):
     def __init__(self):
         super().__init__()
         self.cache = AliyunPathCache()
+        self.download_cache = DownloadUrlCache()
 
     def is_readonly(self):
         return True
@@ -113,12 +192,17 @@ class AliyunWebDavProvider(DAVProvider):
         return items
 
     def get_download_url(self, file_id):
+        cached = self.download_cache.get(file_id)
+        if cached:
+            return cached
         drive = self._drive()
         if not drive:
             return None
         url, msg = run_async(drive.get_download_url(file_id))
         if not url:
             add_log("ERROR", f"【内置WebDAV】阿里云盘下载地址获取失败: {msg}")
+        else:
+            self.download_cache.set(file_id, url)
         return url
 
     def resolve_item(self, path):
@@ -201,7 +285,7 @@ class AliyunFile(DAVNonCollection):
         return parse_aliyun_time(self.item.get("updated_at"))
 
     def support_ranges(self):
-        return False
+        return True
 
     def support_etag(self):
         return True
@@ -218,9 +302,7 @@ class AliyunFile(DAVNonCollection):
         url = self.provider.get_download_url(self.item.get("file_id"))
         if not url:
             raise RuntimeError("Unable to resolve Aliyun download URL")
-        self._response = requests.get(url, stream=True, timeout=30)
-        self._response.raise_for_status()
-        return self._response.raw
+        return RemoteRangeStream(url)
 
     def prevent_locking(self):
         return True
@@ -281,6 +363,7 @@ class QuarkWebDavProvider(DAVProvider):
     def __init__(self):
         super().__init__()
         self.cache = QuarkPathCache()
+        self.download_cache = DownloadUrlCache()
 
     def is_readonly(self):
         return True
@@ -309,12 +392,17 @@ class QuarkWebDavProvider(DAVProvider):
         return items
 
     def get_download_url(self, file_id):
+        cached = self.download_cache.get(file_id)
+        if cached:
+            return cached
         drive = self._drive()
         if not drive:
             return None
         url, msg = run_async(drive.get_download_url(file_id))
         if not url:
             add_log("ERROR", f"【内置WebDAV】夸克下载地址获取失败: {msg}")
+        else:
+            self.download_cache.set(file_id, url)
         return url
 
     def get_download_headers(self):
@@ -410,7 +498,7 @@ class QuarkFile(DAVNonCollection):
         return parse_quark_time(self.item.get("updated_at"))
 
     def support_ranges(self):
-        return False
+        return True
 
     def support_etag(self):
         return True
@@ -427,9 +515,7 @@ class QuarkFile(DAVNonCollection):
         url = self.provider.get_download_url(self.item.get("fid"))
         if not url:
             raise RuntimeError("Unable to resolve Quark download URL")
-        self._response = requests.get(url, headers=self.provider.get_download_headers(), stream=True, timeout=30)
-        self._response.raise_for_status()
-        return self._response.raw
+        return RemoteRangeStream(url, headers=self.provider.get_download_headers())
 
     def prevent_locking(self):
         return True
@@ -490,6 +576,7 @@ class Drive115WebDavProvider(DAVProvider):
     def __init__(self):
         super().__init__()
         self.cache = Drive115PathCache()
+        self.download_cache = DownloadUrlCache()
 
     def is_readonly(self):
         return True
@@ -518,12 +605,17 @@ class Drive115WebDavProvider(DAVProvider):
         return items
 
     def get_download_url(self, pickcode):
+        cached = self.download_cache.get(pickcode)
+        if cached:
+            return cached
         drive = self._drive()
         if not drive:
             return None
         url, msg = run_async(drive.get_download_url(pickcode))
         if not url:
             add_log("ERROR", f"【内置WebDAV】115 下载地址获取失败: {msg}")
+        else:
+            self.download_cache.set(pickcode, url)
         return url
 
     def get_download_headers(self):
@@ -609,7 +701,7 @@ class Drive115File(DAVNonCollection):
         return parse_115_time(self.item.get("te") or self.item.get("tu") or self.item.get("t"))
 
     def support_ranges(self):
-        return False
+        return True
 
     def support_etag(self):
         return True
@@ -627,9 +719,7 @@ class Drive115File(DAVNonCollection):
         url = self.provider.get_download_url(self.item.get("pc"))
         if not url:
             raise RuntimeError("Unable to resolve 115 download URL")
-        self._response = requests.get(url, headers=self.provider.get_download_headers(), stream=True, timeout=30)
-        self._response.raise_for_status()
-        return self._response.raw
+        return RemoteRangeStream(url, headers=self.provider.get_download_headers())
 
     def prevent_locking(self):
         return True
