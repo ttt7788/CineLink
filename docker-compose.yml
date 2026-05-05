@@ -16,6 +16,7 @@ services:
       - CINELINK_DATA_DIR=/app/data
       - CINELINK_WEBDAV_BIND_HOST=0.0.0.0
       - CINELINK_WEBDAV_PORT=8088
+      - CINELINK_WEBDAV_INTERNAL_URL=http://127.0.0.1:8088
       - CINELINK_WEBDAV_PUBLIC_URL=http://127.0.0.1:8088
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8000/"]

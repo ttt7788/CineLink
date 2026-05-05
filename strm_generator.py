@@ -12,6 +12,8 @@ from database import get_db
 from logger import add_log
 
 INTERNAL_SOURCE_TYPES = {'115_internal', 'aliyun_internal', 'quark_internal'}
+INTERNAL_WEBDAV_URL = os.environ.get("CINELINK_WEBDAV_INTERNAL_URL", "http://127.0.0.1:8088").rstrip("/")
+INTERNAL_WEBDAV_PUBLIC_URL = os.environ.get("CINELINK_WEBDAV_PUBLIC_URL", INTERNAL_WEBDAV_URL).rstrip("/")
 
 strm_file_counter = 0  
 metadata_file_counter = 0  # 【新增】元数据下载计数器
@@ -30,7 +32,9 @@ def get_webdav_config(config_id):
     conn.close()
     if not row: return None
     
-    parsed_url = urlparse(row['url'])
+    source_type = row['source_type'] if 'source_type' in row.keys() and row['source_type'] else 'webdav'
+    webdav_url = INTERNAL_WEBDAV_URL if source_type in INTERNAL_SOURCE_TYPES else row['url']
+    parsed_url = urlparse(webdav_url)
     protocol = parsed_url.scheme
     host = parsed_url.hostname
     port = parsed_url.port if parsed_url.port else (80 if protocol == 'http' else 443)
@@ -40,15 +44,14 @@ def get_webdav_config(config_id):
     except:
         min_int, max_int = 1.0, 3.0
 
-    source_type = row['source_type'] if 'source_type' in row.keys() and row['source_type'] else 'webdav'
-
     return {
         'id': row['id'], 'source_type': source_type,
         'config_name': row['config_name'], 'host': host, 'port': int(port),
         'username': row['username'], 'password': row['password'],
         'rootpath': row['rootpath'], 'protocol': protocol,
-        'target_directory': row['target_directory'], 
-        'update_mode': row['update_mode'], 
+        'public_url': INTERNAL_WEBDAV_PUBLIC_URL if source_type in INTERNAL_SOURCE_TYPES else "",
+        'target_directory': row['target_directory'],
+        'update_mode': row['update_mode'],
         'interval': (min_int, max_int),
         'download_enabled': row['download_enabled'] # 【修复】读取是否开启元数据下载
     }
@@ -201,7 +204,7 @@ def create_strm_file(file_name, file_size, config, local_directory, relative_pat
 
     if config.get('source_type') in INTERNAL_SOURCE_TYPES:
         clean_parts = [quote(part) for part in unquote(file_name).split('/') if part]
-        http_link = f"{config['protocol']}://{config['host']}:{config['port']}/{'/'.join(clean_parts)}"
+        http_link = f"{config['public_url']}/{'/'.join(clean_parts)}"
     else:
         clean_file_name = file_name.replace('/dav', '')
         http_link = f"{config['protocol']}://{config['host']}:{config['port']}/d{clean_file_name}"

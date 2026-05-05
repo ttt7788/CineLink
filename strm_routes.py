@@ -9,7 +9,7 @@ from logger import add_log
 # 就是这一行缺失或未保存导致了报错
 strm_router = APIRouter()
 
-INTERNAL_WEBDAV_URL = os.environ.get("CINELINK_WEBDAV_PUBLIC_URL", "http://127.0.0.1:8088").rstrip("/")
+INTERNAL_WEBDAV_URL = os.environ.get("CINELINK_WEBDAV_INTERNAL_URL", "http://127.0.0.1:8088").rstrip("/")
 INTERNAL_ROOTS = {"115_internal": "/115", "aliyun_internal": "/aliyun", "quark_internal": "/quark"}
 
 
