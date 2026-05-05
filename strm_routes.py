@@ -9,6 +9,16 @@ from logger import add_log
 # 就是这一行缺失或未保存导致了报错
 strm_router = APIRouter()
 
+INTERNAL_WEBDAV_URL = os.environ.get("CINELINK_WEBDAV_PUBLIC_URL", "http://127.0.0.1:8088").rstrip("/")
+INTERNAL_ROOTS = {"115_internal": "/115", "aliyun_internal": "/aliyun", "quark_internal": "/quark"}
+
+
+def normalize_strm_config(config: StrmConfigModel):
+    source_type = config.source_type or "webdav"
+    if source_type in INTERNAL_ROOTS:
+        return source_type, INTERNAL_WEBDAV_URL, "", "", INTERNAL_ROOTS[source_type]
+    return source_type, config.url, config.username, config.password, config.rootpath
+
 @strm_router.get("/api/strm/configs")
 def get_strm_configs():
     conn = get_db()
@@ -19,12 +29,7 @@ def get_strm_configs():
 @strm_router.post("/api/strm/configs")
 def add_strm_config(config: StrmConfigModel):
     conn = get_db()
-    source_type = config.source_type or "webdav"
-    internal_roots = {"115_internal": "/115", "aliyun_internal": "/aliyun", "quark_internal": "/quark"}
-    url = "http://127.0.0.1:8088" if source_type in internal_roots else config.url
-    rootpath = internal_roots.get(source_type, config.rootpath)
-    username = "" if source_type in internal_roots else config.username
-    password = "" if source_type in internal_roots else config.password
+    source_type, url, username, password, rootpath = normalize_strm_config(config)
     conn.execute('''INSERT INTO strm_configs
         (source_type, config_name, url, username, password, rootpath, target_directory, download_enabled, update_mode, download_interval_range)
         VALUES (?,?,?,?,?,?,?,?,?,?)''',
@@ -37,12 +42,7 @@ def add_strm_config(config: StrmConfigModel):
 @strm_router.put("/api/strm/configs/{config_id}")
 def update_strm_config(config_id: int, config: StrmConfigModel):
     conn = get_db()
-    source_type = config.source_type or "webdav"
-    internal_roots = {"115_internal": "/115", "aliyun_internal": "/aliyun", "quark_internal": "/quark"}
-    url = "http://127.0.0.1:8088" if source_type in internal_roots else config.url
-    rootpath = internal_roots.get(source_type, config.rootpath)
-    username = "" if source_type in internal_roots else config.username
-    password = "" if source_type in internal_roots else config.password
+    source_type, url, username, password, rootpath = normalize_strm_config(config)
     conn.execute('''UPDATE strm_configs SET
         source_type=?, config_name=?, url=?, username=?, password=?, rootpath=?, target_directory=?,
         download_enabled=?, update_mode=?, download_interval_range=? WHERE id=?''',

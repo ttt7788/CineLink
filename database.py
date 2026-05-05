@@ -2,7 +2,7 @@ import sqlite3
 import os
 
 # 【核心修改1】将数据库存放于独立的 data 目录下，完美适配 Docker 目录挂载
-DB_DIR = "data"
+DB_DIR = os.environ.get("CINELINK_DATA_DIR", "data")
 DB_PATH = os.path.join(DB_DIR, "tmdb_system.db")
 
 def init_db():

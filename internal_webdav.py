@@ -18,8 +18,12 @@ from drive_api import Drive115, QuarkDrive
 from logger import add_log
 
 
-WEBDAV_HOST = "127.0.0.1"
-WEBDAV_PORT = 8088
+WEBDAV_HOST = os.environ.get("CINELINK_WEBDAV_BIND_HOST", "127.0.0.1")
+
+try:
+    WEBDAV_PORT = int(os.environ.get("CINELINK_WEBDAV_PORT", "8088"))
+except ValueError:
+    WEBDAV_PORT = 8088
 
 
 class ThreadingWsgiServer(ThreadingMixIn, WSGIServer):
@@ -668,7 +672,7 @@ class InternalWebDavServer:
         )
         self.thread = threading.Thread(target=self.httpd.serve_forever, name="CineLinkWebDAV", daemon=True)
         self.thread.start()
-        add_log("INFO", f"【内置WebDAV】已启动: http://{self.host}:{self.port}/aliyun 与 /quark")
+        add_log("INFO", f"【内置WebDAV】已启动: http://{self.host}:{self.port}/115、/aliyun、/quark")
 
     def stop(self):
         if not self.httpd:

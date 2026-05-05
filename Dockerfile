@@ -1,26 +1,33 @@
-# 使用轻量级的 Python 3.10 环境
-FROM python:3.10-slim
+FROM python:3.11-slim
 
-# 设置环境变量，确保 Python 输出直接打印到控制台，且不生成 pyc 文件
-ENV PYTHONDONTWRITEBYTECODE=1
-ENV PYTHONUNBUFFERED=1
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1 \
+    TZ=Asia/Shanghai \
+    CINELINK_DATA_DIR=/app/data \
+    CINELINK_WEBDAV_BIND_HOST=0.0.0.0 \
+    CINELINK_WEBDAV_PORT=8088 \
+    CINELINK_WEBDAV_PUBLIC_URL=http://127.0.0.1:8088
 
-# 设置系统时区为上海（极其重要，否则定时任务时间会错乱）
-ENV TZ=Asia/Shanghai
-RUN ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > /etc/timezone
-
-# 设置容器内工作目录
 WORKDIR /app
 
-# 先复制依赖文件并安装（利用 Docker 缓存机制加速后续构建）
-COPY requirements.txt /app/
-RUN pip install --no-cache-dir -r requirements.txt
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates tzdata curl \
+    && ln -snf /usr/share/zoneinfo/$TZ /etc/localtime \
+    && echo $TZ > /etc/timezone \
+    && rm -rf /var/lib/apt/lists/*
 
-# 复制当前目录下的所有代码和静态资源到容器内
-COPY . /app/
+COPY requirements.txt ./
+RUN pip install --upgrade pip \
+    && pip install -r requirements.txt
 
-# 暴露 FastAPI 的默认端口
-EXPOSE 8000
+COPY . .
 
-# 启动命令
+RUN mkdir -p /app/data /data/media
+
+EXPOSE 8000 8088
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
+    CMD curl -fsS http://127.0.0.1:8000/ >/dev/null || exit 1
+
 CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
