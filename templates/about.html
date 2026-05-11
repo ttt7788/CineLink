@@ -1,78 +1,85 @@
-<div v-if="activeMenu === 'about'" class="settings-wrapper">
-    <el-card shadow="never" style="margin-bottom: 20px; line-height: 1.8; border-radius: 12px;">
-        <div style="text-align: center; margin-bottom: 40px; margin-top: 20px;">
-            <el-icon style="font-size: 70px; color: #409EFF;"><Monitor></Monitor></el-icon>
-            <h1 style="margin: 15px 0 5px 0; font-weight: 800; letter-spacing: 1px;">CineLink 云幕智链</h1>
-            <p style="color: #888; font-size: 15px;">Version 2.0.1 Pro | 零境影视挂载中枢</p>
-            <el-tag type="success" effect="dark" round style="margin-top: 10px;">无人值守 · 极速转存 · 零空间防封</el-tag>
+<div v-if="activeMenu === 'about'" class="about-page">
+    <section class="about-hero">
+        <div>
+            <div class="about-kicker">CineLink 云幕智链</div>
+            <h1>影视资源发现、转存、STRM 与播放的一体化中枢</h1>
+            <p>当前版本已切换为内置 AList 网盘层，直接服务夸克、阿里云盘、115 网盘的挂载浏览、STRM 生成与播放代理。</p>
+            <div class="about-tags">
+                <el-tag type="success" effect="dark">内置 AList</el-tag>
+                <el-tag type="primary" effect="dark">三网盘接入</el-tag>
+                <el-tag type="warning" effect="dark">Docker Ready</el-tag>
+                <el-tag type="info" effect="dark">STRM 高速缓存</el-tag>
+            </div>
         </div>
+        <div class="about-version">
+            <div class="version-label">Version</div>
+            <strong>2.0.15</strong>
+            <span>当前开发构建</span>
+        </div>
+    </section>
 
-        <el-divider content-position="center" style="margin-bottom: 30px;">
-            <span style="font-size: 18px; font-weight: bold; color: #303133;">🚀 系统核心能力矩阵</span>
-        </el-divider>
+    <section class="about-grid">
+        <article class="about-card">
+            <el-icon><Search></Search></el-icon>
+            <h3>聚合搜索与热门推荐</h3>
+            <p>全网聚合搜索已升级为搜索工作台，支持快捷关键词、今日热门推荐、结果订阅与一键搜盘。</p>
+        </article>
+        <article class="about-card">
+            <el-icon><Cloudy></Cloudy></el-icon>
+            <h3>三网盘转存与管理</h3>
+            <p>支持夸克、阿里云盘、115 网盘授权接入，转存、目录浏览、文件管理和保存路径配置统一在系统内完成。</p>
+        </article>
+        <article class="about-card">
+            <el-icon><Connection></Connection></el-icon>
+            <h3>内置 AList 网盘层</h3>
+            <p>内置 AList 负责网盘挂载、签名直链和高性能流式读取。旧的内置 WebDAV 服务已移除，代码路径更清爽。</p>
+        </article>
+        <article class="about-card">
+            <el-icon><VideoPlay></VideoPlay></el-icon>
+            <h3>播放代理优化</h3>
+            <p>夸克播放优先走 AList 签名地址，阿里云盘支持预览转码入口，115 保持 Range 友好的直连代理。</p>
+        </article>
+        <article class="about-card">
+            <el-icon><DocumentChecked></DocumentChecked></el-icon>
+            <h3>STRM 生成与记录缓存</h3>
+            <p>内置节点通过 AList API 扫描，不再依赖 8088 WebDAV。生成记录按节点拆分展示，支持增量扫描和域名替换。</p>
+        </article>
+        <article class="about-card">
+            <el-icon><Box></Box></el-icon>
+            <h3>容器化部署</h3>
+            <p>Docker 镜像自动安装 Linux 版 AList，默认暴露 8000 与 5244，数据目录可通过 volume 持久化。</p>
+        </article>
+    </section>
 
-        <el-row :gutter="20">
-            <el-col :span="12" style="margin-bottom: 20px;">
-                <el-card shadow="hover" style="height: 100%; border-radius: 8px;">
-                    <template #header>
-                        <div style="font-weight: bold; font-size: 16px; display: flex; align-items: center;">
-                <el-icon style="margin-right: 8px; color: #E6A23C; font-size: 20px;"><video-camera></video-camera></el-icon> 全自动影视搜刮与订阅
-                        </div>
-                    </template>
-                    <ul style="padding-left: 20px; color: #555; margin: 0;">
-                        <li style="margin-bottom: 8px;">每日自动同步 TMDB 最新的热门电影/剧集趋势。</li>
-                        <li style="margin-bottom: 8px;">支持开启全局开关：发现今日新热剧，<strong>自动将其加入待搜刮队列</strong>。</li>
-                        <li>支持全网聚合盘搜，多渠道智能匹配最佳高画质资源。</li>
-                    </ul>
-                </el-card>
-            </el-col>
-            
-            <el-col :span="12" style="margin-bottom: 20px;">
-                <el-card shadow="hover" style="height: 100%; border-radius: 8px;">
-                    <template #header>
-                        <div style="font-weight: bold; font-size: 16px; display: flex; align-items: center;">
-                            <el-icon style="margin-right: 8px; color: #409EFF; font-size: 20px;"><Cloudy></Cloudy></el-icon> 多网盘极速转存引擎
-                        </div>
-                    </template>
-                    <ul style="padding-left: 20px; color: #555; margin: 0;">
-                        <li style="margin-bottom: 8px;">原生支持 <strong>115网盘、夸克网盘、阿里云盘</strong> 多引擎接入。</li>
-                        <li style="margin-bottom: 8px;">智能转存过滤：自动剔除引流广告(.exe)、压缩包，<strong>仅提取视频和字幕</strong>。</li>
-                        <li>独立配置保存路径，实现多盘空间资源的完美利用隔离。</li>
-                    </ul>
-                </el-card>
-            </el-col>
-        </el-row>
+    <section class="about-panel">
+        <div class="section-head">
+            <div>
+                <h3>当前架构说明</h3>
+                <p>系统内部已从“内置 WebDAV”切换为“内置 AList + 播放代理”。外部 WebDAV 仍可作为用户自定义来源保留。</p>
+            </div>
+        </div>
+        <div class="about-flow">
+            <div><strong>资源发现</strong><span>TMDB 热门 / 聚合搜索</span></div>
+            <div><strong>资源入库</strong><span>订阅队列 / 一键转存</span></div>
+            <div><strong>网盘挂载</strong><span>内置 AList: /quark /aliyun /115</span></div>
+            <div><strong>本地媒体库</strong><span>STRM 输出给 Emby / Jellyfin / Plex</span></div>
+        </div>
+    </section>
 
-        <el-row :gutter="20">
-            <el-col :span="12">
-                <el-card shadow="hover" style="height: 100%; border-radius: 8px;">
-                    <template #header>
-                        <div style="font-weight: bold; font-size: 16px; display: flex; align-items: center;">
-                            <el-icon style="margin-right: 8px; color: #67C23A; font-size: 20px;"><Connection></Connection></el-icon> STRM 本地虚拟映射
-                        </div>
-                    </template>
-                    <ul style="padding-left: 20px; color: #555; margin: 0;">
-                        <li style="margin-bottom: 8px;">完美接管 Emby / Jellyfin / Plex：将云端网盘瞬间变为本地海量影视库。</li>
-                        <li style="margin-bottom: 8px;"><strong>极致增量优化：</strong>基于 SQLite 本地数据库缓存，抛弃低效磁盘遍历。</li>
-                        <li>内置域名一键修复/替换工具，轻松应对外网穿透变动。</li>
-                    </ul>
-                </el-card>
-            </el-col>
-
-            <el-col :span="12">
-                <el-card shadow="hover" style="height: 100%; border-radius: 8px;">
-                    <template #header>
-                        <div style="font-weight: bold; font-size: 16px; display: flex; align-items: center;">
-                            <el-icon style="margin-right: 8px; color: #F56C6C; font-size: 20px;"><Timer></Timer></el-icon> 自动化调度与防风控
-                        </div>
-                    </template>
-                    <ul style="padding-left: 20px; color: #555; margin: 0;">
-                        <li style="margin-bottom: 8px;"><strong>Cron表达式控制：</strong>后台守护进程自动处理资源下发与转存。</li>
-                        <li style="margin-bottom: 8px;">安全随机休眠机制：避免 WebDAV 拉取过快导致触发网盘 403 / 405 封控。</li>
-                        <li>完善的运行日志与前端实时无感自动刷新。</li>
-                    </ul>
-                </el-card>
-            </el-col>
-        </el-row>
-    </el-card>
+    <section class="about-panel">
+        <div class="section-head">
+            <div>
+                <h3>最近更新</h3>
+                <p>这些是当前本地版本已经完成的重点变化。</p>
+            </div>
+        </div>
+        <ul class="about-changelog">
+            <li><strong>移除内置 WebDAV：</strong>删除旧服务代码与 wsgidav 依赖，内部节点统一使用 AList。</li>
+            <li><strong>夸克播放修复：</strong>STRM 改用 `/play/quark_preview`，最终跳转到 AList 签名播放地址。</li>
+            <li><strong>阿里云盘增强：</strong>支持移动端 Refresh Token 扫码获取、转存与预览播放入口。</li>
+            <li><strong>115 网盘接入：</strong>支持扫码授权、内置挂载、STRM 生成与只读文件管理。</li>
+            <li><strong>Docker 适配：</strong>镜像内自动下载 AList Linux 二进制，Compose 配置已清理 8088 端口。</li>
+            <li><strong>界面优化：</strong>菜单图标补齐，全网聚合搜索升级为带热门推荐的工作台页面。</li>
+        </ul>
+    </section>
 </div>

@@ -22,6 +22,45 @@ class QuarkDrive:
         self.timeout = 20.0
         self.api_url = "https://drive.quark.cn/1/clouddrive"
 
+    def _set_cookie_value(self, name: str, value: str):
+        if not name or not value:
+            return
+        parts = []
+        replaced = False
+        for part in (self.cookie or "").split(";"):
+            part = part.strip()
+            if not part:
+                continue
+            if part.startswith(f"{name}="):
+                parts.append(f"{name}={value}")
+                replaced = True
+            else:
+                parts.append(part)
+        if not replaced:
+            parts.append(f"{name}={value}")
+        self.cookie = "; ".join(parts)
+        self.headers["cookie"] = self.cookie
+
+    def _sync_response_cookies(self, res):
+        changed = False
+        for name in ("__puus", "__pus"):
+            if name in res.cookies:
+                self._set_cookie_value(name, res.cookies.get(name))
+                changed = True
+        if changed:
+            try:
+                from database import get_db
+
+                conn = get_db()
+                conn.execute(
+                    "REPLACE INTO system_configs (config_key, config_value) VALUES ('cookie_quark', ?)",
+                    (self.cookie,),
+                )
+                conn.commit()
+                conn.close()
+            except Exception:
+                pass
+
     def _extract_pwd_id(self, share_url: str):
         match = re.search(r'/s/([a-zA-Z0-9]+)', share_url)
         return match.group(1) if match else None
@@ -88,6 +127,7 @@ class QuarkDrive:
                     "_sort": "file_type:asc,updated_at:desc",
                 })
                 res = await client.get(f"{self.api_url}/file/sort", params=params, headers=self.headers)
+                self._sync_response_cookies(res)
                 data = _safe_json(res)
                 if data.get("code") != 0:
                     return [], data.get("message", "获取失败")
@@ -113,8 +153,8 @@ class QuarkDrive:
         user_agents = [
             headers.get("user-agent", "Mozilla/5.0"),
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-            "(KHTML, like Gecko) quark-cloud-drive/2.5.56 Chrome/100.0.4896.160 "
-            "Electron/18.3.5.12-a038f7b798 Safari/537.36 Channel/pckk_other_ch",
+            "(KHTML, like Gecko) quark-cloud-drive/2.5.20 Chrome/100.0.4896.160 "
+            "Electron/18.3.5.4-b478491100 Safari/537.36 Channel/pckk_other_ch",
         ]
         last_msg = "获取夸克下载地址失败"
         async with httpx.AsyncClient(timeout=self.timeout) as client:
@@ -126,6 +166,7 @@ class QuarkDrive:
                     json=payload,
                     headers=headers,
                 )
+                self._sync_response_cookies(res)
                 data = _safe_json(res)
                 if data.get("code") in (23018, "23018"):
                     last_msg = data.get("message", last_msg)
@@ -142,6 +183,54 @@ class QuarkDrive:
                     last_msg = "夸克下载地址为空"
                     continue
                 return url, "success"
+        return None, last_msg
+
+    async def get_preview_url(self, file_fid: str):
+        payload = {
+            "fid": file_fid,
+            "resolutions": "low,normal,high,super,2k,4k",
+            "supports": "fmp4_av,m3u8,dolby_vision",
+        }
+        params = {"pr": "ucpro", "fr": "pc", "uc_param_str": ""}
+        headers = self.headers.copy()
+        headers.update({
+            "origin": "https://pan.quark.cn",
+            "referer": "https://pan.quark.cn/",
+            "user-agent": (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                "(KHTML, like Gecko) quark-cloud-drive/2.5.20 Chrome/100.0.4896.160 "
+                "Electron/18.3.5.4-b478491100 Safari/537.36 Channel/pckk_other_ch"
+            ),
+        })
+        last_msg = "夸克转码播放地址获取失败"
+        async with httpx.AsyncClient(timeout=self.timeout) as client:
+            res = await client.post(
+                f"{self.api_url}/file/v2/play/project",
+                params=params,
+                json=payload,
+                headers=headers,
+            )
+            self._sync_response_cookies(res)
+            data = _safe_json(res)
+            if data.get("code") not in (0, None) or data.get("status") not in (200, None):
+                return None, data.get("message") or last_msg
+            video_list = data.get("data", {}).get("video_list") or []
+            preference = ["4k", "2k", "super", "high", "normal", "low"]
+            candidates = []
+            for item in video_list:
+                info = item.get("video_info") or {}
+                url = info.get("url")
+                if not url:
+                    continue
+                resolution = (info.get("resolution") or item.get("resolution") or "").lower()
+                try:
+                    rank = preference.index(resolution)
+                except ValueError:
+                    rank = len(preference)
+                candidates.append((rank, url))
+            if candidates:
+                candidates.sort(key=lambda x: x[0])
+                return candidates[0][1], "success"
         return None, last_msg
 
     async def make_dir(self, parent_fid: str, dir_name: str):

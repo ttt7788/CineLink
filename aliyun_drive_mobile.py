@@ -1,5 +1,6 @@
 import httpx
 import re
+import time
 import uuid
 
 VALID_VIDEO_EXTS = (
@@ -16,13 +17,18 @@ def _safe_json(res):
 
 
 class AliyunDrive:
+    _token_cache = {}
+
     def __init__(self, refresh_token: str):
         self.refresh_token = refresh_token
         self.access_token = None
         self.default_drive_id = None
+        self.backup_drive_id = None
+        self.resource_drive_id = None
         self.timeout = 25.0
         self.api_url = "https://api.alipan.com"
         self.auth_url = "https://auth.alipan.com"
+        self.user_url = "https://user.aliyundrive.com"
         self.ua = (
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
             "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
@@ -77,6 +83,13 @@ class AliyunDrive:
     async def _refresh_access_token(self):
         if not self.refresh_token:
             return False, "未配置阿里云盘移动端 Refresh Token"
+        cached = self._token_cache.get(self.refresh_token)
+        if cached and cached.get("expires_at", 0) > time.time() + 120:
+            self.access_token = cached.get("access_token")
+            self.default_drive_id = cached.get("default_drive_id")
+            self.backup_drive_id = cached.get("backup_drive_id")
+            self.resource_drive_id = cached.get("resource_drive_id")
+            return True, "success"
         try:
             async with httpx.AsyncClient(timeout=self.timeout) as client:
                 res = await client.post(
@@ -91,7 +104,11 @@ class AliyunDrive:
                     return False, self._format_error(data, "阿里云盘移动端 Token 刷新失败")
 
                 self.access_token = data["access_token"]
-                self.default_drive_id = data.get("default_drive_id") or data.get("default_sbox_drive_id")
+                auth_default_drive_id = data.get("default_drive_id") or data.get("default_sbox_drive_id")
+                user_info = await self._fetch_user_drive_info(client)
+                self.backup_drive_id = user_info.get("backup_drive_id") or auth_default_drive_id
+                self.resource_drive_id = user_info.get("resource_drive_id")
+                self.default_drive_id = self.resource_drive_id or self.backup_drive_id or auth_default_drive_id
                 new_refresh_token = data.get("refresh_token") or self.refresh_token
                 if new_refresh_token and new_refresh_token != self.refresh_token:
                     self.refresh_token = new_refresh_token
@@ -99,9 +116,42 @@ class AliyunDrive:
 
                 if not self.default_drive_id:
                     return False, "阿里云盘 Drive ID 获取失败，请重新扫码获取移动端 Refresh Token"
+                expires_in = int(data.get("expires_in") or 7200)
+                cache_data = {
+                    "access_token": self.access_token,
+                    "default_drive_id": self.default_drive_id,
+                    "backup_drive_id": self.backup_drive_id,
+                    "resource_drive_id": self.resource_drive_id,
+                    "expires_at": time.time() + max(expires_in - 300, 300),
+                }
+                self._token_cache[self.refresh_token] = cache_data
+                if new_refresh_token:
+                    self._token_cache[new_refresh_token] = cache_data
                 return True, "success"
         except Exception as e:
             return False, str(e)
+
+    async def _fetch_user_drive_info(self, client):
+        headers = {
+            "Authorization": f"Bearer {self.access_token}",
+            "Content-Type": "application/json",
+            "User-Agent": self.ua,
+        }
+        for path in ("/v2/user/get", "/v2/user/driveMigrate"):
+            try:
+                res = await client.post(f"{self.user_url}{path}", json={}, headers=headers)
+                data = _safe_json(res)
+                if res.status_code < 400 and isinstance(data, dict):
+                    backup_drive_id = data.get("backup_drive_id")
+                    resource_drive_id = data.get("resource_drive_id")
+                    if backup_drive_id or resource_drive_id:
+                        return {
+                            "backup_drive_id": backup_drive_id,
+                            "resource_drive_id": resource_drive_id,
+                        }
+            except Exception:
+                continue
+        return {}
 
     def _save_refresh_token(self, refresh_token: str):
         try:
@@ -290,6 +340,37 @@ class AliyunDrive:
             if url:
                 return url, "success"
             return None, self._format_error(data, "获取阿里云盘下载地址失败")
+
+    async def get_preview_url(self, file_id: str):
+        success, msg = await self._refresh_access_token()
+        if not success:
+            return None, msg
+        payload = {
+            "drive_id": self.default_drive_id,
+            "file_id": file_id,
+            "category": "live_transcoding",
+            "url_expire_sec": 14400,
+        }
+        async with httpx.AsyncClient(timeout=self.timeout) as client:
+            res = await client.post(
+                f"{self.api_url}/v2/file/get_video_preview_play_info",
+                json=payload,
+                headers=self._auth_headers(),
+            )
+            data = _safe_json(res)
+            if res.status_code >= 400 or data.get("code"):
+                return None, self._format_error(data, "get Aliyun preview URL failed")
+            info = data.get("video_preview_play_info") or {}
+            streams = info.get("live_transcoding_task_list") or []
+            finished = [x for x in streams if x.get("status") == "finished" and x.get("url")]
+            if not finished:
+                return None, "Aliyun preview URL is not ready or unsupported"
+            order = {"FHD": 4, "HD": 3, "SD": 2, "LD": 1}
+            finished.sort(
+                key=lambda x: (order.get(x.get("template_id"), 0), x.get("template_width") or 0),
+                reverse=True,
+            )
+            return finished[0].get("url"), "success"
 
     async def make_dir(self, parent_file_id: str, dir_name: str):
         success, msg = await self._refresh_access_token()

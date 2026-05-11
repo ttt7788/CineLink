@@ -1,5 +1,6 @@
 import httpx
 import datetime
+import asyncio
 import base64
 import io
 import json
@@ -8,10 +9,11 @@ import qrcode
 import qrcode.image.svg
 from fastapi import APIRouter, HTTPException
 from database import get_db, get_sys_config
-from models import ConfigModel, SubscribeModel, BatchSubscribeModel, BatchDeleteModel, SaveLinkModel, DriveListReq, DriveActionReq, QrcodeStatusModel, QrcodeLoginModel, AliyunQrcodeStatusModel, AliyunQrcodeLoginModel
+from models import ConfigModel, SubscribeModel, BatchSubscribeModel, BatchDeleteModel, SaveLinkModel, LinkCheckModel, LinkCheckBatchModel, DriveListReq, DriveActionReq, QrcodeStatusModel, QrcodeLoginModel, AliyunQrcodeStatusModel, AliyunQrcodeLoginModel
 from logger import get_logs, add_log
 from drive_api import Drive115, QuarkDrive
 from aliyun_drive_mobile import AliyunDrive
+from pancheck_client import check_link_validity, infer_pancheck_platform
 
 router = APIRouter()
 
@@ -35,7 +37,8 @@ def update_config(config: ConfigModel):
     try:
         fields = [
             ('api_domain', config.api_domain), ('image_domain', config.image_domain), 
-            ('api_key', config.api_key), ('pansou_domain', config.pansou_domain), 
+            ('api_key', config.api_key), ('pansou_domain', config.pansou_domain),
+            ('pancheck_domain', config.pancheck_domain), ('pancheck_enabled', config.pancheck_enabled),
             ('cron_expression', config.cron_expression), ('cms_api_url', config.cms_api_url), 
             ('cms_api_token', config.cms_api_token), ('cookie_quark', config.cookie_quark), 
             ('token_aliyun', config.token_aliyun), ('quark_save_dir', config.quark_save_dir), 
@@ -187,6 +190,29 @@ async def search_ps(kw: str):
             return d.get("data") if d.get("code") == 0 else d
     except Exception as e: return {"error": f"无法连接: {str(e)}", "merged_by_type": {}}
 
+@router.post("/api/link/check")
+async def api_check_link(req: LinkCheckModel):
+    config = get_sys_config()
+    if config.get('pancheck_enabled', '1') == '0':
+        return {"code": 200, "data": {"valid": None, "status": "disabled", "message": "链接检测已关闭"}}
+    result = await check_link_validity(req.url, req.drive_type or "", req.pwd or "", config)
+    return {"code": 200, "data": result}
+
+@router.post("/api/link/check_batch")
+async def api_check_links(req: LinkCheckBatchModel):
+    config = get_sys_config()
+    if config.get('pancheck_enabled', '1') == '0':
+        return {"code": 200, "data": [{"valid": None, "status": "disabled", "message": "链接检测已关闭"} for _ in req.links]}
+
+    sem = asyncio.Semaphore(4)
+
+    async def check_one(item: LinkCheckModel):
+        async with sem:
+            return await check_link_validity(item.url, item.drive_type or "", item.pwd or "", config)
+
+    results = await asyncio.gather(*(check_one(item) for item in req.links))
+    return {"code": 200, "data": results}
+
 @router.post("/api/save_link")
 async def api_save_link(req: SaveLinkModel):
     from scheduler import push_to_quark, push_to_aliyun, push_to_cms
@@ -201,6 +227,15 @@ async def api_save_link(req: SaveLinkModel):
 
     try:
         add_log("INFO", f"【手动转存】来源类型:{req.drive_type}，识别网盘:{drive_type}，链接:{req.url}")
+        if config.get('pancheck_enabled', '1') != '0' and infer_pancheck_platform(drive_type, req.url):
+            check_result = await check_link_validity(req.url, drive_type, req.pwd or "", config)
+            add_log("INFO", f"【链接检测】{req.title} {drive_type} -> {check_result.get('status')}，{check_result.get('message')}")
+            if check_result.get('valid') is False:
+                msg = check_result.get('message') or "链接失效"
+                add_log("WARNING", f"【手动转存】{req.title} 已拦截失效链接: {msg}")
+                return {"code": 422, "message": f"链接检测失败：{msg}"}
+            if check_result.get('status') in {'pending', 'unknown'}:
+                add_log("WARNING", f"【链接检测】{req.title} 未得到明确结果，继续尝试转存: {check_result.get('message')}")
         if drive_type == 'quark':
             save_dir = config.get('quark_save_dir', '0').split('-')[0].strip() if config.get('quark_save_dir') else "0"
             success, msg = await push_to_quark(config.get('cookie_quark', ''), req.url, req.pwd, save_dir)
@@ -255,7 +290,8 @@ async def api_drive_list(req: DriveListReq):
             items, msg = await api.list_files(req.parent_id or "root")
             for i in items:
                 result.append({"id": i.get('file_id'), "name": i.get('name'), "is_folder": i.get('type') == 'folder', "size": i.get('size', 0), "updated_at": i.get('updated_at', '').replace('T', ' ').replace('Z', '')})
-        result.sort(key=lambda x: (not x['is_folder'], x['updated_at']), reverse=True)
+        result.sort(key=lambda x: x.get('updated_at') or "", reverse=True)
+        result.sort(key=lambda x: not x.get('is_folder', False))
         return {"code": 200, "data": result, "msg": msg}
     except Exception as e: return {"code": 500, "msg": str(e)}
 
@@ -280,6 +316,7 @@ HEADERS_115 = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
     "Accept": "application/json, text/plain, */*"
 }
+ALIST_115_QRCODE_APP = "qandroid"
 
 def build_qrcode_data_url(text: str):
     img = qrcode.make(text, image_factory=qrcode.image.svg.SvgPathImage)
@@ -291,20 +328,20 @@ def build_qrcode_data_url(text: str):
 @router.get("/api/115/qrcode")
 async def get_115_qr():
     try:
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            res = await client.get("https://qrcodeapi.115.com/api/1.0/web/1.0/token/", headers=HEADERS_115)
-            res.raise_for_status()
-            data = res.json()
-            qr_data = data.get("data") or {}
-            qr_text = qr_data.get("qrcode")
-            uid = qr_data.get("uid")
-            if not qr_text and uid:
-                qr_text = f"https://115.com/scan/dg-{uid}"
-            if qr_text:
-                qr_data["qrcode"] = qr_text
-                qr_data["qrcode_image"] = build_qrcode_data_url(qr_text)
-                data["data"] = qr_data
-            return data
+        from p115client import P115Client
+
+        data = P115Client.login_qrcode_token(app=ALIST_115_QRCODE_APP, headers=HEADERS_115)
+        qr_data = data.get("data") or {}
+        qr_text = qr_data.get("qrcode")
+        uid = qr_data.get("uid")
+        if not qr_text and uid:
+            qr_text = f"https://115.com/scan/dg-{uid}"
+        if qr_text:
+            qr_data["qrcode"] = qr_text
+            qr_data["qrcode_image"] = build_qrcode_data_url(qr_text)
+            qr_data["qrcode_source"] = ALIST_115_QRCODE_APP
+            data["data"] = qr_data
+        return data
     except Exception as e:
         add_log("ERROR", f"获取 115 二维码失败: {str(e)}")
         raise HTTPException(status_code=500, detail=f"网络请求或 115 接口拦截: {str(e)}")
@@ -313,7 +350,11 @@ async def get_115_qr():
 async def get_115_st(p: QrcodeStatusModel):
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
-            res = await client.get(f"https://qrcodeapi.115.com/get/status/?uid={p.uid}&time={p.time}&sign={p.sign}", headers=HEADERS_115)
+            res = await client.get(
+                "https://qrcodeapi.115.com/get/status/",
+                params={"uid": p.uid, "time": p.time, "sign": p.sign},
+                headers=HEADERS_115,
+            )
             return res.json()
     except httpx.TimeoutException:
         return {"state": 1, "code": 0, "message": "等待扫码中", "data": {"status": 0}}
@@ -323,6 +364,29 @@ async def get_115_st(p: QrcodeStatusModel):
 @router.post("/api/115/login")
 async def log_115(p: QrcodeLoginModel):
     try:
+        from p115client import P115Client
+
+        res_json = P115Client.login_qrcode_scan_result(p.uid, app=ALIST_115_QRCODE_APP, headers=HEADERS_115)
+        if res_json.get('state'):
+            cookie_data = (res_json.get("data") or {}).get("cookie") or {}
+            if not cookie_data:
+                raise HTTPException(status_code=400, detail="115 login succeeded but no cookie returned")
+            ck = "; ".join(f"{k}={v}" for k, v in cookie_data.items())
+            conn = get_db()
+            conn.execute("REPLACE INTO system_configs (config_key, config_value) VALUES ('cookie_115', ?)", (ck,))
+            conn.execute("REPLACE INTO system_configs (config_key, config_value) VALUES ('alist_115_cookie_source', ?)", (ALIST_115_QRCODE_APP,))
+            conn.execute("REPLACE INTO system_configs (config_key, config_value) VALUES ('alist_115_qrcode_token', ?)", ("",))
+            conn.execute("REPLACE INTO system_configs (config_key, config_value) VALUES ('alist_115_qrcode_source', ?)", (ALIST_115_QRCODE_APP,))
+            conn.commit()
+            conn.close()
+            try:
+                from alist_integration import sync_alist_storages
+
+                sync_alist_storages()
+            except Exception as sync_error:
+                add_log("WARNING", f"115 鐧诲綍鎴愬姛锛屼絾鍚屾鍒板唴缃?AList 澶辫触: {sync_error}")
+            return {"message": "鎴愬姛"}
+        raise HTTPException(status_code=400, detail="115 login failed or qrcode expired")
         async with httpx.AsyncClient(timeout=10.0) as client:
             res = await client.post("https://passportapi.115.com/app/1.0/web/1.0/login/qrcode/", data={"app": "web", "account": p.uid}, headers=HEADERS_115)
             res_json = res.json()
@@ -330,8 +394,16 @@ async def log_115(p: QrcodeLoginModel):
                 ck = "; ".join(f"{k}={v}" for k, v in res_json['data']['cookie'].items())
                 conn = get_db()
                 conn.execute("REPLACE INTO system_configs (config_key, config_value) VALUES ('cookie_115', ?)", (ck,))
+                conn.execute("REPLACE INTO system_configs (config_key, config_value) VALUES ('alist_115_qrcode_token', ?)", (p.uid,))
+                conn.execute("REPLACE INTO system_configs (config_key, config_value) VALUES ('alist_115_qrcode_source', ?)", ("web",))
                 conn.commit()
                 conn.close()
+                try:
+                    from alist_integration import sync_alist_storages
+
+                    sync_alist_storages()
+                except Exception as sync_error:
+                    add_log("WARNING", f"115 登录成功，但同步到内置 AList 失败: {sync_error}")
                 return {"message": "成功"}
             raise HTTPException(status_code=400, detail="登录失败或二维码已过期")
     except Exception as e:

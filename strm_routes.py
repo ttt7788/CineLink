@@ -9,14 +9,13 @@ from logger import add_log
 # 就是这一行缺失或未保存导致了报错
 strm_router = APIRouter()
 
-INTERNAL_WEBDAV_URL = os.environ.get("CINELINK_WEBDAV_INTERNAL_URL", "http://127.0.0.1:8088").rstrip("/")
 INTERNAL_ROOTS = {"115_internal": "/115", "aliyun_internal": "/aliyun", "quark_internal": "/quark"}
 
 
 def normalize_strm_config(config: StrmConfigModel):
     source_type = config.source_type or "webdav"
     if source_type in INTERNAL_ROOTS:
-        return source_type, INTERNAL_WEBDAV_URL, "", "", INTERNAL_ROOTS[source_type]
+        return source_type, "internal://alist", "", "", INTERNAL_ROOTS[source_type]
     return source_type, config.url, config.username, config.password, config.rootpath
 
 @strm_router.get("/api/strm/configs")
@@ -57,7 +56,7 @@ def delete_strm_config(config_id: int):
     conn = get_db()
     conn.execute("DELETE FROM strm_configs WHERE id = ?", (config_id,))
     conn.commit(); conn.close()
-    add_log("WARNING", f"🗑️ 删除 WebDAV 节点 (ID: {config_id})")
+    add_log("WARNING", f"🗑️ 删除 STRM 节点 (ID: {config_id})")
     return {"message": "配置已删除"}
 
 @strm_router.get("/api/strm/settings")

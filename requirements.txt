@@ -5,5 +5,4 @@ pydantic
 jinja2
 easywebdav
 qrcode
-wsgidav
 p115client

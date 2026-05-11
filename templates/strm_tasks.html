@@ -21,7 +21,7 @@
     <el-dialog v-model="showTaskDialog" :title="isEditingTask ? '编辑定时生成任务' : '创建定时生成任务'" width="450px">
         <el-form label-position="top">
             <el-form-item label="任务名称"><el-input v-model="newStrmTask.task_name"></el-input></el-form-item>
-            <el-form-item label="选择 WebDAV 节点">
+            <el-form-item label="选择 STRM 节点">
                 <el-select v-model="newStrmTask.config_id" style="width: 100%;">
                     <el-option v-for="c in strmConfigs" :key="c.id" :label="c.config_name" :value="c.id"></el-option>
                 </el-select>

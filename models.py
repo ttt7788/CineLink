@@ -6,6 +6,8 @@ class ConfigModel(BaseModel):
     image_domain: str
     api_key: str
     pansou_domain: str
+    pancheck_domain: Optional[str] = ""
+    pancheck_enabled: Optional[str] = "1"
     cron_expression: str
     cms_api_url: str
     cms_api_token: str
@@ -39,6 +41,14 @@ class SaveLinkModel(BaseModel):
     url: str
     pwd: Optional[str] = ""
     drive_type: str
+
+class LinkCheckModel(BaseModel):
+    url: str
+    drive_type: Optional[str] = ""
+    pwd: Optional[str] = ""
+
+class LinkCheckBatchModel(BaseModel):
+    links: List[LinkCheckModel]
 
 class DriveListReq(BaseModel):
     drive_type: str

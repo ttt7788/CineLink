@@ -49,7 +49,12 @@ def init_db():
         ('api_domain', 'https://api.tmdb.org'), # 保留官方公共域名
         ('image_domain', 'https://image.tmdb.org'), # 保留官方公共域名
         ('pansou_domain', ''), # 置空
+        ('pancheck_domain', os.environ.get('CINELINK_PANCHECK_URL', '')),
+        ('pancheck_enabled', '1'),
         ('cookie_115', ''),
+        ('alist_115_cookie_source', ''),
+        ('alist_115_qrcode_token', ''),
+        ('alist_115_qrcode_source', ''),
         ('cookie_quark', ''),
         ('token_aliyun', ''),
         ('quark_save_dir', '0'),
@@ -76,6 +81,12 @@ def init_db():
         cursor.execute("ALTER TABLE strm_configs ADD COLUMN source_type TEXT DEFAULT 'webdav'")
     except sqlite3.OperationalError:
         pass
+    cursor.execute(
+        "UPDATE strm_configs SET url='internal://alist' "
+        "WHERE source_type IN ('115_internal','aliyun_internal','quark_internal')"
+    )
+    cursor.execute("UPDATE strm_configs SET config_name=REPLACE(config_name, '内置WebDAV', '内置挂载') WHERE config_name LIKE '%内置WebDAV%'")
+    cursor.execute("UPDATE strm_configs SET config_name=REPLACE(config_name, '内置 WebDAV', '内置挂载') WHERE config_name LIKE '%内置 WebDAV%'")
 
     cursor.execute('''CREATE TABLE IF NOT EXISTS strm_settings (
                     id INTEGER PRIMARY KEY AUTOINCREMENT, video_formats TEXT, subtitle_formats TEXT,

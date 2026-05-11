@@ -13,7 +13,8 @@ from play_routes import play_router
 from strm_routes import strm_router
 from scheduler import auto_subscription_task
 from logger import add_log
-from internal_webdav import start_internal_webdav, stop_internal_webdav
+from alist_sidecar import start_alist_sidecar, stop_alist_sidecar
+from alist_integration import sync_alist_storages
 
 # 修复 Windows 注册表 MIME 类型 Bug
 mimetypes.add_type("application/javascript", ".js")
@@ -38,13 +39,14 @@ async def lifespan(app: FastAPI):
     add_log("INFO", "🚀 CineLink 核心引擎开始启动...")
     init_db()
     add_log("INFO", "✅ SQLite 数据库与数据表初始化就绪。")
-    start_internal_webdav()
+    start_alist_sidecar()
+    sync_alist_storages()
     task = asyncio.create_task(background_task_loop())
     add_log("INFO", "🌐 核心路由接口、STRM矩阵模块与静态资源加载完成。")
     add_log("INFO", "🎉 CineLink 系统启动完毕，正在监听端口请求。")
     yield
     task.cancel()
-    stop_internal_webdav()
+    stop_alist_sidecar()
     add_log("WARNING", "🛑 系统收到关闭信号，后台守护进程与服务器已安全终止。")
 
 # 【核心修改】API 接口文档增加版本号 v2.0.1

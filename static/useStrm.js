@@ -31,19 +31,25 @@ const useStrm = (API_BASE, ElMessage, msgBox) => {
 
     const applyStrmSourceType = () => {
         const internalSources = {
-            '115_internal': { rootpath: '/115', name: '115网盘内置WebDAV' },
-            'aliyun_internal': { rootpath: '/aliyun', name: '阿里云盘内置WebDAV' },
-            'quark_internal': { rootpath: '/quark', name: '夸克网盘内置WebDAV' },
+            '115_internal': { rootpath: '/115', name: '115网盘内置挂载' },
+            'aliyun_internal': { rootpath: '/aliyun', name: '阿里云盘内置挂载' },
+            'quark_internal': { rootpath: '/quark', name: '夸克网盘内置挂载' },
         };
         const source = internalSources[newStrmConfig.value.source_type];
         if (source) {
-            newStrmConfig.value.url = 'http://127.0.0.1:8088';
+            newStrmConfig.value.url = 'internal://alist';
             newStrmConfig.value.rootpath = source.rootpath;
             newStrmConfig.value.username = '';
             newStrmConfig.value.password = '';
             if (!newStrmConfig.value.config_name) newStrmConfig.value.config_name = source.name;
         }
     };
+    const formatStrmSourceType = (sourceType) => ({
+        webdav: '外部 WebDAV',
+        '115_internal': '内置 115',
+        aliyun_internal: '内置阿里云',
+        quark_internal: '内置夸克',
+    }[sourceType || 'webdav'] || sourceType);
     const openStrmDialog = () => { isEditingConfig.value = false; newStrmConfig.value = defaultStrmConfig(); showStrmDialog.value = true; };
     const editStrmConfig = (row) => { isEditingConfig.value = true; editingConfigId.value = row.id; newStrmConfig.value = { source_type: 'webdav', ...row }; applyStrmSourceType(); showStrmDialog.value = true; };
     const saveStrmConfig = async () => {
@@ -104,7 +110,7 @@ const useStrm = (API_BASE, ElMessage, msgBox) => {
         strmRecords, recordTotal, recordPage, recordPageSize, recordSummaries, activeRecordConfigId,
         strmTasks, showTaskDialog, newStrmTask, isEditingTask,
         strmSettings, replaceTool,
-        loadStrmConfigs, openStrmDialog, editStrmConfig, saveStrmConfig, deleteStrmConfig, runStrmTask, applyStrmSourceType,
+        loadStrmConfigs, openStrmDialog, editStrmConfig, saveStrmConfig, deleteStrmConfig, runStrmTask, applyStrmSourceType, formatStrmSourceType,
         loadStrmRecords, clearStrmRecords, handleRecordTabChange, getRecordSummaryCount,
         loadStrmTasks, openTaskDialog, editStrmTask, saveStrmTask, toggleTaskStatus, deleteStrmTask, getStrmConfigName,
         loadStrmSettings, saveStrmSettings, runReplaceDomain

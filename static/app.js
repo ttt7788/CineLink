@@ -1,4 +1,4 @@
-const { createApp, ref, onMounted, watch } = Vue;
+const { createApp, ref, onMounted, watch, computed } = Vue;
 const { ElMessage, ElMessageBox } = ElementPlus;
 const msgBox = ElMessageBox;
 const API_BASE = '/api';
@@ -6,7 +6,7 @@ const API_BASE = '/api';
 const app = createApp({
     setup() {
         const activeMenu = ref('hot'), syncingData = ref(false), loading = ref(false);
-        const lm = ref([]), sr = ref([]), sq = ref('');
+        const lm = ref([]), sr = ref([]), sq = ref(''), discoverHot = ref([]), discoverSearched = ref(false);
         const subscriptions = ref([]), records = ref([]), systemLogs = ref([]);
         const currentPage = ref(1), pageSize = ref(30), totalItems = ref(0);
         
@@ -18,7 +18,7 @@ const app = createApp({
         const drivePaths = ref([]); 
         const currentDriveType = ref(''); 
         
-        const config = ref({ api_domain: '', image_domain: '', api_key: '', pansou_domain: '', cookie_115: '', cookie_quark: '', token_aliyun: '', quark_save_dir: '0', aliyun_save_dir: 'root', cron_expression: '', cms_api_url: '', cms_api_token: '', auto_subscribe_new: '0', auto_subscribe_drive: '115' });
+        const config = ref({ api_domain: '', image_domain: '', api_key: '', pansou_domain: '', pancheck_domain: '', pancheck_enabled: '1', cookie_115: '', cookie_quark: '', token_aliyun: '', quark_save_dir: '0', aliyun_save_dir: 'root', cron_expression: '', cms_api_url: '', cms_api_token: '', auto_subscribe_new: '0', auto_subscribe_drive: '115' });
 
         const pv = ref(false), pr = ref({}), curKw = ref('');
         const curMedia = ref(null), savingLink = ref(false);
@@ -50,6 +50,50 @@ const app = createApp({
         const strmModule = window.useStrm(API_BASE, ElMessage, ElMessageBox);
 
         const getMenuTitle = (key) => ({ hot: '今日热门影视', movie: '本地电影库', tv: '本地剧集库', discover: '全网聚合搜索' }[key] || '');
+        const discoverQuickKeywords = ref(['4K 杜比视界', '国配 动作', '科幻 2025', '豆瓣高分', '喜剧 合家欢', '悬疑 犯罪', '动画 电影', '韩剧 最新']);
+        const discoverHotStats = computed(() => {
+            const items = discoverHot.value || [];
+            const movies = items.filter(i => (i.media_type || 'movie') === 'movie').length;
+            return { total: items.length, movies, tv: Math.max(items.length - movies, 0) };
+        });
+        const driveMeta = {
+            '115': { label: '115网盘', tag: 'info', icon: '115' },
+            aliyun: { label: '阿里云盘', tag: 'primary', icon: '阿' },
+            quark: { label: '夸克网盘', tag: 'success', icon: '夸' },
+        };
+        const driveOrder = ['115', 'aliyun', 'quark'];
+        const normalizeDriveType = (driveType) => driveType || '115';
+        const buildDriveGroups = (items) => {
+            const source = items || [];
+            const extraTypes = [...new Set(source.map(item => normalizeDriveType(item.drive_type)).filter(type => !driveOrder.includes(type)))];
+            return [...driveOrder, ...extraTypes].map(type => ({
+                type,
+                ...(driveMeta[type] || { label: type || '未知网盘', tag: 'info', icon: String(type || '?').slice(0, 2) }),
+                items: source.filter(item => normalizeDriveType(item.drive_type) === type),
+            }));
+        };
+        const getDriveLabel = (driveType) => (driveMeta[driveType] || { label: driveType || '未知网盘' }).label;
+        const getDriveTagType = (driveType) => (driveMeta[driveType] || { tag: 'info' }).tag;
+        const getMediaTypeLabel = (mediaType) => mediaType === 'tv' ? '剧集' : '电影';
+        const subscriptionGroups = computed(() => buildDriveGroups(subscriptions.value));
+        const subscriptionTotal = computed(() => subscriptions.value.length);
+        const recordGroups = computed(() => buildDriveGroups(records.value));
+        const transferRecordTotal = computed(() => records.value.length);
+        const recordStats = computed(() => {
+            const items = records.value || [];
+            const tv = items.filter(item => item.media_type === 'tv').length;
+            return { total: items.length, movie: Math.max(items.length - tv, 0), tv };
+        });
+        const panSearchStats = computed(() => {
+            const groups = Object.values(pr.value || {});
+            const rows = groups.flatMap(items => items || []);
+            return {
+                total: rows.length,
+                valid: rows.filter(row => row.check_status === 'valid').length,
+                invalid: rows.filter(row => row.check_status === 'invalid').length,
+                checking: rows.filter(row => row.check_status === 'checking' || row.check_status === 'pending').length,
+            };
+        });
         const formatFileSize = (bytes) => { if (bytes === 0) return '0 B'; const k = 1024, sizes = ['B', 'KB', 'MB', 'GB', 'TB']; const i = Math.floor(Math.log(bytes) / Math.log(k)); return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i]; };
 
         const loadConfig = async () => { try { const r = await axios.get(`${API_BASE}/config`); config.value = { ...config.value, ...r.data }; } catch (e) {} };
@@ -78,6 +122,14 @@ const app = createApp({
             } finally { 
                 loading.value = false; 
             } 
+        };
+        const loadDiscoverHot = async () => {
+            try {
+                const r = await axios.get(`${API_BASE}/local_media`, { params: { type: 'hot', page: 1, size: 8 } });
+                discoverHot.value = r.data && Array.isArray(r.data.items) ? r.data.items : (Array.isArray(r.data) ? r.data.slice(0, 8) : []);
+            } catch (e) {
+                discoverHot.value = [];
+            }
         };
         
         const handlePageChange = (val) => loadLocalMedia(activeMenu.value, val);
@@ -120,13 +172,29 @@ const app = createApp({
             else if(i === 'drive_quark') initDriveView('quark');
             else if(i === 'drive_aliyun') initDriveView('aliyun');
             else if(i === 'drive_115') initDriveView('115');
+            else if(i === 'discover') { if (!discoverHot.value.length) loadDiscoverHot(); }
             else if(i === 'strm_configs') strmModule.loadStrmConfigs();
             else if(i === 'strm_records') { strmModule.recordPage.value = 1; strmModule.loadStrmRecords(); }
             else if(i === 'strm_tasks') { strmModule.loadStrmConfigs(); strmModule.loadStrmTasks(); }
             else if(i === 'strm_settings') strmModule.loadStrmSettings();
         };
 
-        const searchTMDB = async () => { if (!sq.value) return; loading.value = true; try { const r = await axios.get(`${API_BASE}/search`, { params: { query: sq.value } }); sr.value = r.data.results.filter(x => x.media_type !== 'person'); } finally { loading.value = false; } };
+        const searchTMDB = async () => {
+            const query = (sq.value || '').trim();
+            if (!query) return;
+            discoverSearched.value = true;
+            loading.value = true;
+            try {
+                const r = await axios.get(`${API_BASE}/search`, { params: { query } });
+                sr.value = (r.data.results || []).filter(x => x.media_type !== 'person');
+            } finally {
+                loading.value = false;
+            }
+        };
+        const useDiscoverKeyword = (keyword) => {
+            sq.value = keyword;
+            searchTMDB();
+        };
         const isMediaSelected = (i) => selectedMediaList.value.some(m => (m.tmdb_id || m.id) === (i.tmdb_id || i.id));
         const toggleMediaSelect = (i, val) => { if (val) selectedMediaList.value.push(i); else selectedMediaList.value = selectedMediaList.value.filter(m => (m.tmdb_id || m.id) !== (i.tmdb_id || i.id)); };
 
@@ -145,12 +213,120 @@ const app = createApp({
             if (rt.includes('aliyun') || rt.includes('alipan') || link.includes('alipan.com') || link.includes('aliyundrive.com')) return 'aliyun';
             return '115';
         };
+        const canCheckLink = (rawType, row) => {
+            const rt = String(rawType || '').toLowerCase();
+            const link = String(row?.url || '').toLowerCase();
+            return rt.includes('quark') || rt.includes('aliyun') || rt.includes('alipan') || rt.includes('115') ||
+                link.includes('pan.quark.cn') || link.includes('alipan.com') || link.includes('aliyundrive.com') ||
+                link.includes('115.com/s/') || link.includes('115cdn.com/s/');
+        };
+        const isTransferType = (rawType, row) => {
+            const type = String(rawType || '').toLowerCase();
+            return ['quark', 'aliyun', 'alipan', '115', 'magnet', 'ed2k'].some(t => type.includes(t)) || canCheckLink(rawType, row);
+        };
+        const setRowCheckResult = (row, result) => {
+            row.check_status = result?.status || 'unknown';
+            row.check_valid = result?.valid;
+            row.check_message = result?.message || '';
+            row.check_source = result?.source || '';
+        };
+        const checkLinkStatus = async (row, rawType, quiet = false) => {
+            if (!row?.url || !canCheckLink(rawType, row)) return { status: 'unsupported', valid: null, message: '暂不支持检测' };
+            if (config.value.pancheck_enabled === '0') return { status: 'disabled', valid: null, message: '链接检测已关闭' };
+            row.check_status = 'checking';
+            row.check_message = '检测中...';
+            const dt = inferDriveType(rawType, row.url);
+            try {
+                const r = await axios.post(`${API_BASE}/link/check`, {
+                    url: row.url,
+                    pwd: row.password || row.pwd || '',
+                    drive_type: dt
+                });
+                const result = r.data.data || {};
+                setRowCheckResult(row, result);
+                if (!quiet && result.valid === false) ElMessage.error('链接失效：' + (result.message || '无法转存'));
+                return result;
+            } catch (e) {
+                const result = { status: 'unknown', valid: null, message: e.response?.data?.detail || e.message };
+                setRowCheckResult(row, result);
+                return result;
+            }
+        };
+        const checkSearchResults = async () => {
+            if (config.value.pancheck_enabled === '0') return;
+            const tasks = [];
+            Object.entries(pr.value || {}).forEach(([type, links]) => {
+                (links || []).forEach((row) => {
+                    if (!canCheckLink(type, row)) return;
+                    row.check_status = 'checking';
+                    row.check_message = '检测中...';
+                    tasks.push({ row, payload: { url: row.url, pwd: row.password || row.pwd || '', drive_type: inferDriveType(type, row.url) } });
+                });
+            });
+            if (!tasks.length) return;
+            try {
+                const r = await axios.post(`${API_BASE}/link/check_batch`, { links: tasks.map(t => t.payload) });
+                const results = r.data.data || [];
+                tasks.forEach((task, index) => setRowCheckResult(task.row, results[index] || {}));
+            } catch (e) {
+                tasks.forEach(task => setRowCheckResult(task.row, { status: 'unknown', valid: null, message: e.response?.data?.detail || e.message }));
+            }
+        };
+        const getCheckTagType = (status) => {
+            if (status === 'valid') return 'success';
+            if (status === 'invalid') return 'danger';
+            if (status === 'checking' || status === 'pending') return 'warning';
+            return 'info';
+        };
+        const getCheckLabel = (row) => {
+            if (row.check_status === 'valid') return '有效';
+            if (row.check_status === 'invalid') return '失效';
+            if (row.check_status === 'checking') return '检测中';
+            if (row.check_status === 'pending') return '待确认';
+            if (row.check_status === 'disabled') return '已关闭';
+            if (row.check_status === 'unsupported') return '不支持';
+            return '待检测';
+        };
+        const getDriveTypeName = (type) => {
+            const key = String(type || '').toLowerCase();
+            if (key.includes('115')) return '115 网盘';
+            if (key.includes('quark')) return '夸克网盘';
+            if (key.includes('aliyun') || key.includes('alipan')) return '阿里云盘';
+            if (key.includes('baidu')) return '百度网盘';
+            if (key.includes('xunlei')) return '迅雷云盘';
+            if (key.includes('magnet')) return '磁力资源';
+            if (key.includes('ed2k')) return 'ED2K';
+            if (key.includes('uc')) return 'UC 网盘';
+            if (key.includes('tianyi')) return '天翼云盘';
+            return String(type || '未知来源').toUpperCase();
+        };
+        const getDriveTypeClass = (type) => {
+            const key = String(type || '').toLowerCase();
+            if (key.includes('115')) return 'pan-type-115';
+            if (key.includes('quark')) return 'pan-type-quark';
+            if (key.includes('aliyun') || key.includes('alipan')) return 'pan-type-aliyun';
+            return 'pan-type-other';
+        };
+        const getDriveTypeIcon = (type) => {
+            const key = String(type || '').toLowerCase();
+            if (key.includes('115')) return '115';
+            if (key.includes('quark')) return '夸';
+            if (key.includes('aliyun') || key.includes('alipan')) return '阿';
+            if (key.includes('baidu')) return '百';
+            if (key.includes('magnet')) return '磁';
+            return '链';
+        };
 
         const manualSaveLink = async (row, rawType) => {
             if (!curMedia.value) return;
             const dt = inferDriveType(rawType, row.url);
             savingLink.value = true;
             try {
+                const checkResult = await checkLinkStatus(row, rawType, true);
+                if (checkResult.valid === false) {
+                    ElMessage.error('链接检测失败，已停止转存：' + (checkResult.message || '链接失效'));
+                    return;
+                }
                 const r = await axios.post(`${API_BASE}/save_link`, {
                     tmdb_id: curMedia.value.tmdb_id || curMedia.value.id,
                     media_type: curMedia.value.media_type || 'movie',
@@ -174,6 +350,10 @@ const app = createApp({
                 savingLink.value = false;
             }
         };
+
+        watch(pr, () => {
+            if (pv.value) setTimeout(checkSearchResults, 0);
+        });
         
         const runTaskManual = async () => { 
             try { 
@@ -308,15 +488,16 @@ const app = createApp({
             await loadConfig(); 
             strmModule.loadStrmConfigs(); 
             strmModule.loadStrmSettings();
+            loadDiscoverHot();
             
             loadLocalMedia('hot', 1); 
         });
 
         return { 
-            activeMenu, syncingData, loading, lm, sr, sq, subscriptions, records, systemLogs, config, pv, pr, qrLoading, qUrl, qSt, aliyunQrLoading, aliyunQrUrl, aliyunQrStatus, curKw, currentPage, pageSize, totalItems,
+            activeMenu, syncingData, loading, lm, sr, sq, discoverHot, discoverSearched, discoverQuickKeywords, discoverHotStats, subscriptions, subscriptionGroups, subscriptionTotal, records, recordGroups, transferRecordTotal, recordStats, panSearchStats, systemLogs, config, pv, pr, qrLoading, qUrl, qSt, aliyunQrLoading, aliyunQrUrl, aliyunQrStatus, curKw, currentPage, pageSize, totalItems,
             selectedMediaList, selectedTableRows, isMediaSelected, toggleMediaSelect, batchSubscribe, handleSelectionChange, batchDeleteRecords,
             driveFiles, driveLoading, drivePaths, currentDriveType, formatFileSize, clickDriveBreadcrumb, openDriveFolder, promptMkdir, promptRename, deleteDriveFile,
-            getMenuTitle, handleMenuSelect, saveConfig, searchTMDB, subscribe, unsubscribeMedia, deleteRecord, openPanSou, manualSaveLink, generate115QrCode, generateAliyunQrCode, loadLogs, runTaskManual, handlePageChange,
+            getMenuTitle, getDriveLabel, getDriveTagType, getMediaTypeLabel, getDriveTypeName, getDriveTypeClass, getDriveTypeIcon, handleMenuSelect, saveConfig, searchTMDB, useDiscoverKeyword, subscribe, unsubscribeMedia, deleteRecord, openPanSou, manualSaveLink, checkLinkStatus, isTransferType, getCheckTagType, getCheckLabel, generate115QrCode, generateAliyunQrCode, loadLogs, runTaskManual, handlePageChange,
             autoRefreshLogs, toggleLogPoll, 
             ...strmModule
         };
