@@ -41,7 +41,35 @@ def init_db():
         cursor.execute("ALTER TABLE subscriptions ADD COLUMN drive_type VARCHAR(20) DEFAULT '115'")
     except sqlite3.OperationalError:
         pass 
-    cursor.execute('''CREATE TABLE IF NOT EXISTS system_logs (id INTEGER PRIMARY KEY AUTOINCREMENT, level VARCHAR(20), message TEXT, created_at DATETIME)''')
+    cursor.execute('''CREATE TABLE IF NOT EXISTS series_bindings (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    tmdb_id INTEGER NOT NULL,
+                    drive_type VARCHAR(20) NOT NULL,
+                    title VARCHAR(255),
+                    cloud_parent_id TEXT,
+                    cloud_path TEXT,
+                    source_share_url TEXT,
+                    source_share_pwd TEXT,
+                    latest_episode_count INTEGER DEFAULT 0,
+                    latest_item_name TEXT,
+                    latest_item_updated_at TEXT,
+                    last_checked_at DATETIME,
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE(tmdb_id, drive_type))''')
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_series_bindings_drive ON series_bindings(drive_type, tmdb_id)")
+    cursor.execute('''CREATE TABLE IF NOT EXISTS system_logs (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    level VARCHAR(20),
+                    module VARCHAR(50) DEFAULT 'system',
+                    message TEXT,
+                    created_at DATETIME)''')
+    try:
+        cursor.execute("ALTER TABLE system_logs ADD COLUMN module VARCHAR(50) DEFAULT 'system'")
+    except sqlite3.OperationalError:
+        pass
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_system_logs_module ON system_logs(module, id)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_system_logs_level ON system_logs(level, id)")
     
     # 【核心修改2】将私人的虚拟模板数据全部置空，仅保留公共服务域名和系统开关状态
     default_configs = [
@@ -57,30 +85,55 @@ def init_db():
         ('alist_115_qrcode_source', ''),
         ('cookie_quark', ''),
         ('token_aliyun', ''),
+        ('drive123_client_id', ''),
+        ('drive123_client_secret', ''),
+        ('drive115_save_dir', '0'),
         ('quark_save_dir', '0'),
         ('aliyun_save_dir', 'root'), 
-        ('cron_expression', '0 * * * *'), # 保留标准 Cron 表达式
-        ('cms_api_url', ''), # 置空
-        ('cms_api_token', ''), # 置空
+        ('drive123_save_dir', '0'),
+        ('cron_expression', '0 * * * *'),
         ('last_sync_date', ''),
         ('last_trending_sync_date', ''),
         ('last_movie_sync_date', ''),
         ('last_tv_sync_date', ''),
         ('last_base_sync_date', ''),
         ('auto_subscribe_new', '0'),
-        ('auto_subscribe_drive', '115')
+        ('auto_subscribe_drive', '115'),
+        ('magnet_download_drive', '115'),
+        ('ed2k_download_drive', '115'),
+        ('plugin_recycle_enabled', '0'),
+        ('plugin_recycle_drives', '115,aliyun,quark'),
+        ('plugin_recycle_interval_hours', '24'),
+        ('plugin_recycle_115_password', ''),
+        ('plugin_recycle_last_run', '')
     ]
     cursor.executemany('INSERT OR IGNORE INTO system_configs (config_key, config_value) VALUES (?, ?)', default_configs)
 
     cursor.execute('''CREATE TABLE IF NOT EXISTS strm_configs (
                     id INTEGER PRIMARY KEY AUTOINCREMENT, source_type TEXT DEFAULT 'webdav',
                     config_name TEXT, url TEXT, username TEXT,
-                    password TEXT, rootpath TEXT, target_directory TEXT, download_enabled INTEGER DEFAULT 1,
+                    password TEXT, rootpath TEXT, root_id TEXT DEFAULT '', target_directory TEXT, download_enabled INTEGER DEFAULT 1,
                     update_mode TEXT DEFAULT 'incremental', download_interval_range TEXT DEFAULT '1-3')''')
     try:
         cursor.execute("ALTER TABLE strm_configs ADD COLUMN source_type TEXT DEFAULT 'webdav'")
     except sqlite3.OperationalError:
         pass
+    try:
+        cursor.execute("ALTER TABLE strm_configs ADD COLUMN root_id TEXT DEFAULT ''")
+    except sqlite3.OperationalError:
+        pass
+    for source_type, config_key, fallback in (
+        ("115_internal", "drive115_save_dir", "0"),
+        ("aliyun_internal", "aliyun_save_dir", "root"),
+        ("quark_internal", "quark_save_dir", "0"),
+        ("123_internal", "drive123_save_dir", "0"),
+    ):
+        row = cursor.execute("SELECT config_value FROM system_configs WHERE config_key=?", (config_key,)).fetchone()
+        root_id = ((row[0] if row else fallback) or fallback).split("-")[0].strip() or fallback
+        cursor.execute(
+            "UPDATE strm_configs SET root_id=? WHERE source_type=? AND COALESCE(root_id, '')=''",
+            (root_id, source_type),
+        )
     cursor.execute(
         "UPDATE strm_configs SET url='internal://alist' "
         "WHERE source_type IN ('115_internal','aliyun_internal','quark_internal')"
@@ -106,6 +159,20 @@ def init_db():
     cursor.execute('''CREATE TABLE IF NOT EXISTS strm_tasks (
                     id INTEGER PRIMARY KEY AUTOINCREMENT, task_name TEXT, 
                     config_id INTEGER, cron_expression TEXT, is_enabled INTEGER DEFAULT 1)''')
+
+    cursor.execute('''CREATE TABLE IF NOT EXISTS transfer_download_tasks (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    title TEXT,
+                    source_url TEXT NOT NULL,
+                    pwd TEXT DEFAULT '',
+                    link_type TEXT DEFAULT 'share',
+                    drive_type TEXT DEFAULT '115',
+                    save_dir TEXT DEFAULT '',
+                    status TEXT DEFAULT 'pending',
+                    message TEXT DEFAULT '',
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP)''')
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_transfer_download_tasks_status ON transfer_download_tasks(status, created_at)")
 
     conn.commit()
     conn.close()

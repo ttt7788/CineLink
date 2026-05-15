@@ -4,12 +4,13 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>CineLink - 云幕智链</title>
+    <link rel="icon" href="data:,">
     <link rel="stylesheet" href="/static/lib/index.min.css" />
     <script src="/static/lib/vue.global.prod.min.js"></script>
     <script src="/static/lib/index.full.min.js"></script>
     <script src="/static/lib/axios.min.js"></script>
     <script src="/static/lib/index.iife.min.js"></script>
-    <link rel="stylesheet" href="/static/style.css?v=2.0.22" />
+    <link rel="stylesheet" href="/static/style.css?v=2.0.33" />
     <style> 
         .el-dropdown { vertical-align: middle; margin-right: 5px; } 
         .form-tip { font-size: 12px; color: #888; margin-top: 5px; line-height: 1.4; }
@@ -69,15 +70,35 @@
                             </el-menu-item>
                         </el-sub-menu>
 
-                        <el-menu-item index="subscriptions">
-                            <el-icon><Tickets></Tickets></el-icon>
-                            <template #title>订阅队列</template>
-                        </el-menu-item>
-                        
-                        <el-menu-item index="records">
-                            <el-icon><circle-check></circle-check></el-icon>
-                            <template #title>转存记录</template>
-                        </el-menu-item>
+                        <el-sub-menu index="m_media_tasks">
+                            <template #title>
+                                <el-icon><Tickets></Tickets></el-icon>
+                                <span>媒体任务</span>
+                            </template>
+                            <el-menu-item index="subscriptions">
+                                <el-icon><Tickets></Tickets></el-icon>
+                                <template #title>订阅队列</template>
+                            </el-menu-item>
+                            <el-menu-item index="records">
+                                <el-icon><circle-check></circle-check></el-icon>
+                                <template #title>转存记录</template>
+                            </el-menu-item>
+                        </el-sub-menu>
+
+                        <el-sub-menu index="m_transfer_download">
+                            <template #title>
+                                <el-icon><Download></Download></el-icon>
+                                <span>转存下载</span>
+                            </template>
+                            <el-menu-item index="transfer_task_add">
+                                <el-icon><Plus></Plus></el-icon>
+                                <template #title>任务添加</template>
+                            </el-menu-item>
+                            <el-menu-item index="transfer_download_records">
+                                <el-icon><List></List></el-icon>
+                                <template #title>转存记录</template>
+                            </el-menu-item>
+                        </el-sub-menu>
                         
                         <el-sub-menu index="m_drive">
                             <template #title>
@@ -96,6 +117,10 @@
                                 <el-icon><Files></Files></el-icon>
                                 <template #title>115网盘</template>
                             </el-menu-item>
+                            <el-menu-item index="drive_123">
+                                <el-icon><Collection></Collection></el-icon>
+                                <template #title>123云盘</template>
+                            </el-menu-item>
                         </el-sub-menu>
 
                         <el-sub-menu index="m_strm">
@@ -111,34 +136,21 @@
                                 <el-icon><document-checked></document-checked></el-icon>
                                 <template #title>生成记录</template>
                             </el-menu-item>
-                            <el-menu-item index="strm_tasks">
+                            <el-menu-item index="strm_tools">
                                 <el-icon><alarm-clock></alarm-clock></el-icon>
-                                <template #title>定时任务</template>
-                            </el-menu-item>
-                            <el-menu-item index="strm_settings">
-                                <el-icon><set-up></set-up></el-icon>
-                                <template #title>规则工具</template>
+                                <template #title>规则与定时</template>
                             </el-menu-item>
                         </el-sub-menu>
 
-                        <el-sub-menu index="m2">
-                            <template #title>
-                                <el-icon><Setting></Setting></el-icon>
-                                <span>系统设置</span>
-                            </template>
-                            <el-menu-item index="settings">
-                                <el-icon><Operation></Operation></el-icon>
-                                <template #title>搜刮配置</template>
-                            </el-menu-item>
-                            <el-menu-item index="settings_115">
-                                <el-icon><Key></Key></el-icon>
-                                <template #title>网盘授权</template>
-                            </el-menu-item>
-                            <el-menu-item index="logs">
-                                <el-icon><Document></Document></el-icon>
-                                <template #title>运行日志</template>
-                            </el-menu-item>
-                        </el-sub-menu>
+                        <el-menu-item index="settings_center">
+                            <el-icon><Setting></Setting></el-icon>
+                            <template #title>配置中心</template>
+                        </el-menu-item>
+
+                        <el-menu-item index="logs">
+                            <el-icon><Document></Document></el-icon>
+                            <template #title>运行日志</template>
+                        </el-menu-item>
 
                         <el-menu-item index="about">
                             <el-icon><info-filled></info-filled></el-icon>
@@ -152,8 +164,23 @@
                     
                     [% include 'strm_configs.html' %]
                     [% include 'strm_records.html' %]
-                    [% include 'strm_tasks.html' %]
-                    [% include 'strm_settings.html' %]
+                    <div v-if="activeMenu === 'strm_tools'" class="strm-tools-page">
+                        <section class="page-toolbar">
+                            <div>
+                                <div class="page-kicker">STRM 管理</div>
+                                <h2>规则与定时</h2>
+                                <p>把自动生成调度、格式规则和域名修复合并到一个页面，便于一次性检查 STRM 生成链路。</p>
+                            </div>
+                        </section>
+                        <el-tabs class="settings-center-tabs strm-tools-tabs">
+                            <el-tab-pane label="自动化调度">
+                                [% include 'strm_tasks.html' %]
+                            </el-tab-pane>
+                            <el-tab-pane label="生成规则">
+                                [% include 'strm_settings.html' %]
+                            </el-tab-pane>
+                        </el-tabs>
+                    </div>
                     [% include 'about.html' %]
 
                     <div v-if="activeMenu==='discover'" class="discover-page">
@@ -253,10 +280,28 @@
                         </section>
                     </div>
 
-                    <div v-if="['hot','movie','tv'].includes(activeMenu)">
-                        <h2 style="margin-top:0">{{ getMenuTitle(activeMenu) }}</h2>
-                        <div v-if="selectedMediaList.length > 0" class="batch-toolbar">
-                            <span style="color: #67c23a; font-weight: bold; font-size: 16px;"><el-icon style="vertical-align: middle;"><circle-check-filled></circle-check-filled></el-icon> 已选中 {{ selectedMediaList.length }} 部影视</span>
+                    <div v-if="['hot','movie','tv'].includes(activeMenu)" class="media-library-page">
+                        <section class="page-toolbar media-library-toolbar">
+                            <div class="toolbar-title">
+                                <span>{{ mediaPageMeta.kicker }}</span>
+                                <h2>{{ mediaPageMeta.title }}</h2>
+                                <p>{{ mediaPageMeta.desc }}</p>
+                            </div>
+                            <div class="media-toolbar-actions">
+                                <el-tag type="info" effect="plain">本页 {{ mediaLibraryStats.current }}</el-tag>
+                                <el-tag type="success" effect="plain">已入库 {{ mediaLibraryStats.transferred }}</el-tag>
+                            </div>
+                        </section>
+
+                        <section class="media-stats-grid">
+                            <div class="media-stat-card"><span>总条目</span><strong>{{ mediaLibraryStats.total }}</strong></div>
+                            <div class="media-stat-card"><span>本页展示</span><strong>{{ mediaLibraryStats.current }}</strong></div>
+                            <div class="media-stat-card"><span>电影</span><strong>{{ mediaLibraryStats.movie }}</strong></div>
+                            <div class="media-stat-card"><span>剧集</span><strong>{{ mediaLibraryStats.tv }}</strong></div>
+                        </section>
+
+                        <div v-if="selectedMediaList.length > 0" class="media-batch-toolbar">
+                            <span><el-icon><circle-check-filled></circle-check-filled></el-icon>已选中 {{ selectedMediaList.length }} 部影视</span>
                             <el-dropdown split-button type="success" @click="batchSubscribe('115')" @command="batchSubscribe">
                                 批量订阅至 115网盘
                                 <template #dropdown>
@@ -269,15 +314,24 @@
                             </el-dropdown>
                             <el-button @click="selectedMediaList = []" plain>取消选择</el-button>
                         </div>
-                        <div class="media-grid">
-                            <el-card v-for="i in lm" :key="i.tmdb_id||i.id" :body-style="{padding:'10px'}" shadow="hover" style="position: relative;">
-                                <div style="position: absolute; top: 8px; right: 8px; z-index: 5;">
-                                    <el-checkbox :model-value="isMediaSelected(i)" @change="(val) => toggleMediaSelect(i, val)" size="large" style="background: rgba(255,255,255,0.85); padding: 0 5px; border-radius: 4px;"></el-checkbox>
+                        <div class="media-grid media-library-grid">
+                            <div v-for="i in lm" :key="i.tmdb_id||i.id" class="media-tile" :class="{ selected: isMediaSelected(i) }">
+                                <div class="media-select">
+                                    <el-checkbox :model-value="isMediaSelected(i)" @change="(val) => toggleMediaSelect(i, val)" size="large"></el-checkbox>
                                 </div>
-                                <img :src="i.poster_path?config.image_domain+'/t/p/w500'+i.poster_path:'https://via.placeholder.com/200x300?text=No+Poster'" class="poster">
+                                <div class="poster-wrap">
+                                    <img :src="i.poster_path?config.image_domain+'/t/p/w500'+i.poster_path:'https://via.placeholder.com/200x300?text=No+Poster'" class="poster">
+                                    <div class="poster-gradient"></div>
+                                    <el-tag class="media-type-badge" size="small" :type="(i.media_type || activeMenu) === 'tv' ? 'success' : 'primary'">{{ (i.media_type || activeMenu) === 'tv' ? '剧集' : '电影' }}</el-tag>
+                                </div>
                                 <div class="media-info">
                                     <div class="title">{{i.title||i.name}}</div>
-                                    <div class="action-group">
+                                    <div class="media-meta-row">
+                                        <span v-if="i.vote_average">评分 {{ Number(i.vote_average).toFixed(1) }}</span>
+                                        <span v-if="i.popularity">热度 {{ Number(i.popularity).toFixed(0) }}</span>
+                                        <span v-if="i.release_date || i.first_air_date">{{ i.release_date || i.first_air_date }}</span>
+                                    </div>
+                                    <div class="media-card-actions">
                                         <el-dropdown split-button 
                                             :type="i.sub_status === 'success' ? 'success' : (i.sub_status === 'pending' ? 'warning' : 'primary')" 
                                             size="small" 
@@ -295,16 +349,16 @@
                                         <el-button type="info" size="small" @click="openPanSou(i)">搜盘</el-button>
                                     </div>
                                 </div>
-                            </el-card>
+                            </div>
                         </div>
-                        <div style="margin-top: 30px; display: flex; justify-content: center;" v-if="totalItems > 0">
+                        <div class="media-pagination" v-if="totalItems > 0">
                             <el-pagination background layout="total, prev, pager, next, jumper" :total="totalItems" :page-size="pageSize" v-model:current-page="currentPage" @current-change="handlePageChange"></el-pagination>
                         </div>
                     </div>
 
-                    <div v-if="['drive_quark', 'drive_aliyun', 'drive_115'].includes(activeMenu)">
+                    <div v-if="['drive_quark', 'drive_aliyun', 'drive_115', 'drive_123'].includes(activeMenu)">
                         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
-                            <h2 style="margin: 0;">{{ activeMenu === 'drive_quark' ? '夸克网盘管理' : (activeMenu === 'drive_aliyun' ? '阿里云盘管理' : '115网盘管理') }}</h2>
+                            <h2 style="margin: 0;">{{ currentDriveStatus.label }}文件管理</h2>
                             <el-button type="primary" @click="promptMkdir"><el-icon style="margin-right: 5px;"><folder-add></folder-add></el-icon>新建文件夹</el-button>
                         </div>
                         <div class="drive-breadcrumb">
@@ -330,6 +384,178 @@
                                         <el-button type="danger" size="small" plain @click="deleteDriveFile(s.row)">删除</el-button>
                                     </template>
                                     <el-tag v-else type="info">115只读</el-tag>
+                                </template>
+                            </el-table-column>
+                        </el-table>
+                    </div>
+
+                    <div v-if="activeMenu==='plugin_develop'" class="plugin-page">
+                        <section class="page-toolbar">
+                            <div>
+                                <div class="page-kicker">插件</div>
+                                <h2>插件开发</h2>
+                                <p>把可选能力独立成插件，核心功能保持简洁，后续可继续接入站点采集、网盘工具和自动化任务。</p>
+                            </div>
+                        </section>
+                        <section class="plugin-dev-grid">
+                            <article class="plugin-dev-card active">
+                                <div class="plugin-dev-icon"><el-icon><Delete></Delete></el-icon></div>
+                                <h3>回收站自动清理</h3>
+                                <p>支持按网盘读取回收站，并可按固定间隔自动清空。</p>
+                                <el-button type="primary" plain @click="handleMenuSelect('plugin_recycle')">打开配置</el-button>
+                            </article>
+                            <article class="plugin-dev-card">
+                                <div class="plugin-dev-icon muted"><el-icon><Connection></Connection></el-icon></div>
+                                <h3>站点采集适配</h3>
+                                <p>采集类插件保持预留入口，避免不稳定站点逻辑影响主应用启动。</p>
+                                <el-tag type="info" effect="plain">预留</el-tag>
+                            </article>
+                            <article class="plugin-dev-card">
+                                <div class="plugin-dev-icon muted"><el-icon><Tools></Tools></el-icon></div>
+                                <h3>网盘工具扩展</h3>
+                                <p>后续可把批量检测、批量移动、字幕整理等工具独立成插件。</p>
+                                <el-tag type="info" effect="plain">规划中</el-tag>
+                            </article>
+                        </section>
+                    </div>
+
+                    <div v-if="activeMenu==='plugin_recycle'" class="plugin-page">
+                        <section class="page-toolbar">
+                            <div>
+                                <div class="page-kicker">插件</div>
+                                <h2>回收站自动清空</h2>
+                                <p>按网盘查看回收站内容，并在后台按设定间隔自动清空。未完成授权的网盘不会执行。</p>
+                            </div>
+                            <el-button type="primary" @click="saveRecycleConfig">保存插件配置</el-button>
+                        </section>
+                        <section class="plugin-settings-panel">
+                            <div class="plugin-recycle-form">
+                                <el-form-item label="启用自动清空">
+                                    <el-switch v-model="recycleConfig.enabled" active-value="1" inactive-value="0" active-text="启用" inactive-text="停用"></el-switch>
+                                </el-form-item>
+                                <el-form-item label="间隔小时">
+                                    <el-input-number v-model="recycleConfig.interval_hours" :min="1" :max="720" style="width: 100%;"></el-input-number>
+                                </el-form-item>
+                                <el-form-item label="执行网盘">
+                                    <el-select v-model="recycleConfig.drives" multiple collapse-tags style="width: 100%;">
+                                        <el-option v-for="item in pluginDriveOptions" :key="item.value" :label="item.label" :value="item.value"></el-option>
+                                    </el-select>
+                                </el-form-item>
+                                <el-form-item label="115 清空密码">
+                                    <el-input v-model="recycleConfig.password_115" type="password" show-password placeholder="未设置时默认 000000"></el-input>
+                                </el-form-item>
+                            </div>
+                            <div class="form-tip">上次执行: {{ recycleConfig.last_run || '尚未执行' }}</div>
+                        </section>
+                        <section class="recycle-drive-grid">
+                            <article v-for="item in driveConfigCards" :key="item.type" class="recycle-drive-card">
+                                <div class="record-card-head">
+                                    <div class="drive-mark" :class="'drive-' + item.type">{{ item.type === 'aliyun' ? '阿' : (item.type === 'quark' ? '夸' : item.type) }}</div>
+                                    <div>
+                                        <h3>{{ item.label }}</h3>
+                                        <p>{{ item.authReady ? '授权可用' : '未完成授权' }}</p>
+                                    </div>
+                                    <el-tag :type="item.authReady ? 'success' : 'warning'" effect="plain">{{ item.authReady ? '可读取' : '待配置' }}</el-tag>
+                                </div>
+                                <div class="recycle-card-actions">
+                                    <el-button size="small" type="primary" plain :loading="recycleLoading[item.type]" @click="loadRecycleItems(item.type)">读取</el-button>
+                                    <el-button size="small" type="danger" plain :disabled="!item.authReady || item.type === '123'" @click="emptyRecyclebin(item.type)">清空</el-button>
+                                </div>
+                                <el-table :data="getRecycleItems(item.type)" size="small" max-height="260" v-loading="recycleLoading[item.type]">
+                                    <el-table-column prop="name" label="名称" min-width="150" show-overflow-tooltip></el-table-column>
+                                    <el-table-column prop="type" label="类型" width="72"></el-table-column>
+                                    <el-table-column prop="trashed_at" label="删除时间" width="150" show-overflow-tooltip></el-table-column>
+                                </el-table>
+                            </article>
+                        </section>
+                    </div>
+
+                    <div v-if="activeMenu==='transfer_task_add'" class="transfer-download-page">
+                        <section class="record-header">
+                            <div>
+                                <h2>转存下载任务</h2>
+                                <p>粘贴网盘分享链接、磁力或 ED2K，系统会自动识别类型并保存到对应网盘的默认目录。</p>
+                            </div>
+                            <div class="record-actions">
+                                <el-button type="primary" plain @click="loadTransferDownloadTasks" :loading="transferTaskLoading">刷新任务</el-button>
+                            </div>
+                        </section>
+
+                        <section class="transfer-download-grid">
+                            <div class="transfer-task-card">
+                                <h3>任务添加</h3>
+                                <el-form label-position="top">
+                                    <el-form-item label="链接列表">
+                                        <el-input
+                                            v-model="transferTaskForm.urls"
+                                            type="textarea"
+                                            :rows="10"
+                                            placeholder="每行一个链接；提取码会自动识别。例如：https://pan.baidu.com/s/xxx?pwd=dyyj">
+                                        </el-input>
+                                    </el-form-item>
+                                    <el-button type="primary" size="large" :loading="transferTaskLoading" @click="submitTransferDownloadTasks">添加并执行</el-button>
+                                </el-form>
+                            </div>
+
+                            <div class="transfer-task-card">
+                                <h3>磁力 / ED2K 下载配置</h3>
+                                <p class="transfer-card-tip">磁力和 ED2K 会按照这里选择的网盘提交下载任务；当前已接入 115 离线下载接口。</p>
+                                <el-form label-position="top">
+                                    <el-form-item label="磁力默认下载网盘">
+                                        <el-select v-model="config.magnet_download_drive">
+                                            <el-option v-for="item in driveConfigCards" :key="item.type" :label="item.label" :value="item.type"></el-option>
+                                        </el-select>
+                                    </el-form-item>
+                                    <el-form-item label="ED2K 默认下载网盘">
+                                        <el-select v-model="config.ed2k_download_drive">
+                                            <el-option v-for="item in driveConfigCards" :key="item.type" :label="item.label" :value="item.type"></el-option>
+                                        </el-select>
+                                    </el-form-item>
+                                    <el-button type="success" plain @click="saveConfig">保存下载配置</el-button>
+                                </el-form>
+                                <div class="transfer-detect-box">
+                                    <strong>识别规则</strong>
+                                    <span>分享链接：自动识别 115 / 夸克 / 阿里云盘 / 123</span>
+                                    <span>磁力：使用“磁力默认下载网盘”</span>
+                                    <span>ED2K：使用“ED2K 默认下载网盘”</span>
+                                </div>
+                            </div>
+                        </section>
+                    </div>
+
+                    <div v-if="activeMenu==='transfer_download_records'" class="transfer-download-page">
+                        <section class="record-header">
+                            <div>
+                                <h2>转存下载记录</h2>
+                                <p>查看手动添加的分享链接、磁力和 ED2K 任务状态，失败后可直接重试。</p>
+                            </div>
+                            <div class="record-actions">
+                                <el-tag type="info" effect="plain">{{ transferDownloadTasks.length }} 条任务</el-tag>
+                                <el-button type="primary" plain @click="loadTransferDownloadTasks" :loading="transferTaskLoading">刷新</el-button>
+                            </div>
+                        </section>
+                        <el-table :data="transferDownloadTasks" stripe class="transfer-task-table" v-loading="transferTaskLoading">
+                            <el-table-column label="任务" min-width="230" show-overflow-tooltip>
+                                <template #default="s">
+                                    <div class="record-title">
+                                        <span>{{ s.row.title }}</span>
+                                        <el-tag size="small" effect="plain">{{ getTransferTaskTypeLabel(s.row) }}</el-tag>
+                                    </div>
+                                </template>
+                            </el-table-column>
+                            <el-table-column label="网盘" width="110">
+                                <template #default="s"><el-tag :type="getDriveTagType(s.row.drive_type)" size="small">{{ getDriveLabel(s.row.drive_type) }}</el-tag></template>
+                            </el-table-column>
+                            <el-table-column prop="save_dir" label="保存目录" width="130" show-overflow-tooltip></el-table-column>
+                            <el-table-column label="状态" width="110">
+                                <template #default="s"><el-tag :type="getTransferTaskStatusType(s.row.status)" size="small">{{ s.row.status }}</el-tag></template>
+                            </el-table-column>
+                            <el-table-column prop="message" label="结果" min-width="260" show-overflow-tooltip></el-table-column>
+                            <el-table-column prop="created_at" label="创建时间" width="170"></el-table-column>
+                            <el-table-column label="操作" width="150">
+                                <template #default="s">
+                                    <el-button size="small" type="primary" plain @click="retryTransferDownloadTask(s.row)">重试</el-button>
+                                    <el-button size="small" type="danger" plain @click="deleteTransferDownloadTask(s.row)">删除</el-button>
                                 </template>
                             </el-table-column>
                         </el-table>
@@ -391,6 +617,7 @@
                                 </div>
                                 <div class="record-actions">
                                     <el-tag type="success" effect="plain">{{ transferRecordTotal }} 条成功记录</el-tag>
+                                    <el-button type="primary" plain :loading="bindingRefreshing" @click="refreshSeriesBindings">刷新剧集绑定</el-button>
                                     <el-button type="danger" plain :disabled="!selectedTableRows.length" @click="batchDeleteRecords">清理选中</el-button>
                                 </div>
                             </section>
@@ -410,19 +637,18 @@
                                 </div>
                             </section>
 
-                            <div class="record-grid">
-                                <section v-for="group in recordGroups" :key="group.type" class="record-card">
+                            <div v-if="records.length" class="record-grid">
+                                <section v-for="group in pagedRecordGroups" :key="group.type" class="record-card">
                                     <div class="record-card-head">
                                         <div class="drive-mark" :class="'drive-' + group.type">{{ group.icon }}</div>
                                         <div>
                                             <h3>{{ group.label }}</h3>
-                                            <p>{{ group.items.length }} 条成功记录</p>
+                                            <p>{{ getRecordGroupSummary(group) }}</p>
                                         </div>
-                                        <el-tag :type="group.tag" effect="plain">{{ group.items.length }}</el-tag>
+                                        <el-tag :type="group.tag" effect="plain">{{ group.total }}</el-tag>
                                     </div>
 
-                                    <el-empty v-if="group.items.length === 0" description="暂无转存记录" :image-size="70"></el-empty>
-                                    <el-table v-else :data="group.items" row-key="tmdb_id" stripe @selection-change="handleSelectionChange" class="record-table">
+                                    <el-table :data="group.items" row-key="tmdb_id" stripe @selection-change="handleSelectionChange" class="record-table">
                                         <el-table-column type="selection" width="42"></el-table-column>
                                         <el-table-column label="作品" min-width="170" show-overflow-tooltip>
                                             <template #default="s">
@@ -434,6 +660,17 @@
                                         </el-table-column>
                                         <el-table-column label="状态" width="86">
                                             <template #default="s"><el-tag type="success" size="small">已转存</el-tag></template>
+                                        </el-table-column>
+                                        <el-table-column label="剧集绑定" min-width="260" show-overflow-tooltip>
+                                            <template #default="s">
+                                                <div class="record-binding">
+                                                    <el-tag v-if="s.row.media_type === 'tv' && s.row.cloud_path" type="success" size="small">已绑定</el-tag>
+                                                    <el-tag v-else-if="s.row.media_type === 'tv'" type="danger" size="small">未绑定</el-tag>
+                                                    <el-tag v-else type="info" size="small">电影</el-tag>
+                                                    <span>{{ getSeriesBindingText(s.row) }}</span>
+                                                </div>
+                                                <div v-if="s.row.media_type === 'tv' && s.row.last_checked_at" class="record-binding-sub">最近扫描 {{ s.row.last_checked_at }}</div>
+                                            </template>
                                         </el-table-column>
                                         <el-table-column label="操作" width="138">
                                             <template #default="s">
@@ -451,9 +688,157 @@
                                             </template>
                                         </el-table-column>
                                     </el-table>
+                                    <div v-if="group.total > transferRecordPageSize" class="record-pagination">
+                                        <span class="record-page-hint">当前显示 {{ group.rangeText }}</span>
+                                        <el-pagination
+                                            background
+                                            small
+                                            layout="prev, pager, next"
+                                            :total="group.total"
+                                            :page-size="transferRecordPageSize"
+                                            :current-page="group.page"
+                                            @current-change="(page) => setRecordGroupPage(group.type, page)">
+                                        </el-pagination>
+                                    </div>
                                 </section>
                             </div>
+                            <el-empty v-if="!records.length" description="暂无转存记录" :image-size="90"></el-empty>
                         </div>
+                    </div>
+
+                    <div v-if="activeMenu==='settings_center'" class="settings-center-page">
+                        <section class="page-toolbar">
+                            <div>
+                                <div class="page-kicker">系统配置</div>
+                                <h2>配置中心</h2>
+                                <p>把搜刮源、网盘授权、默认保存目录和插件配置集中到一个页面，减少菜单跳转。</p>
+                            </div>
+                            <div class="settings-toolbar-actions">
+                                <el-button type="primary" @click="saveConfig">保存基础配置</el-button>
+                                <el-button type="success" plain @click="saveRecycleConfig">保存插件配置</el-button>
+                            </div>
+                        </section>
+
+                        <el-tabs class="settings-center-tabs">
+                            <el-tab-pane label="基础搜刮">
+                                <section class="settings-section">
+                                    <div class="section-head compact">
+                                        <div>
+                                            <h3>搜索与订阅</h3>
+                                            <p>配置 TMDB、盘搜接口、链接检测和自动订阅策略。</p>
+                                        </div>
+                                    </div>
+                                    <el-form label-position="top">
+                                        <el-row :gutter="16">
+                                            <el-col :span="12"><el-form-item label="TMDB API Key"><el-input v-model="config.api_key"></el-input></el-form-item></el-col>
+                                            <el-col :span="12"><el-form-item label="本地盘搜 API 接口地址"><el-input v-model="config.pansou_domain"></el-input></el-form-item></el-col>
+                                        </el-row>
+                                        <el-row :gutter="16">
+                                            <el-col :span="12"><el-form-item label="PanCheck 链接检测服务地址"><el-input v-model="config.pancheck_domain" placeholder="例如：http://127.0.0.1:6080"></el-input></el-form-item></el-col>
+                                            <el-col :span="12">
+                                                <el-form-item label="自动订阅今日新增趋势">
+                                                    <div class="inline-config-row">
+                                                        <el-switch v-model="config.auto_subscribe_new" active-value="1" inactive-value="0" active-text="开启" inactive-text="关闭"></el-switch>
+                                                        <el-select v-model="config.auto_subscribe_drive" placeholder="默认入库网盘" style="width: 180px;" :disabled="config.auto_subscribe_new !== '1'">
+                                                            <el-option label="115网盘" value="115"></el-option>
+                                                            <el-option label="阿里云盘" value="aliyun"></el-option>
+                                                            <el-option label="夸克网盘" value="quark"></el-option>
+                                                            <el-option label="123云盘" value="123"></el-option>
+                                                        </el-select>
+                                                    </div>
+                                                </el-form-item>
+                                            </el-col>
+                                        </el-row>
+                                        <el-form-item>
+                                            <el-switch v-model="config.pancheck_enabled" active-value="1" inactive-value="0" active-text="搜索结果与转存前检测链接有效性" inactive-text="关闭检测"></el-switch>
+                                        </el-form-item>
+                                    </el-form>
+                                </section>
+                            </el-tab-pane>
+
+                            <el-tab-pane label="网盘授权">
+                                <section class="drive-config-strip">
+                                    <div v-for="item in driveConfigCards" :key="item.type" class="drive-config-card" :class="{ ready: item.ready, missing: !item.ready }">
+                                        <div class="drive-config-title">
+                                            <strong>{{ item.label }}</strong>
+                                            <el-tag :type="item.ready ? 'success' : 'warning'" size="small">{{ item.ready ? '可用' : '待配置' }}</el-tag>
+                                        </div>
+                                        <p>默认保存目录: {{ item.saveDir || '未配置' }}</p>
+                                        <span>{{ item.ready ? '转存、文件管理和 STRM 可执行' : '缺少 ' + item.missing.join('、') }}</span>
+                                    </div>
+                                </section>
+                                <section class="drive-settings-grid compact">
+                                    <div class="settings-panel">
+                                        <div class="settings-panel-head"><h3>夸克网盘</h3><el-tag :type="getDriveConfigStatus('quark').ready ? 'success' : 'warning'" size="small">{{ getDriveConfigStatus('quark').ready ? '已配置' : '待配置' }}</el-tag></div>
+                                        <el-form label-position="top">
+                                            <el-form-item label="夸克 Cookie"><el-input v-model="config.cookie_quark" type="textarea" :rows="4"></el-input></el-form-item>
+                                            <el-form-item label="默认保存目录 ID"><el-input v-model="config.quark_save_dir" placeholder="默认 0"></el-input></el-form-item>
+                                        </el-form>
+                                    </div>
+                                    <div class="settings-panel">
+                                        <div class="settings-panel-head"><h3>阿里云盘</h3><el-tag :type="getDriveConfigStatus('aliyun').ready ? 'success' : 'warning'" size="small">{{ getDriveConfigStatus('aliyun').ready ? '已配置' : '待配置' }}</el-tag></div>
+                                        <el-form label-position="top">
+                                            <el-form-item label="移动端 Refresh Token"><el-input v-model="config.token_aliyun" type="textarea" :rows="3"></el-input></el-form-item>
+                                            <el-form-item label="默认保存目录 ID"><el-input v-model="config.aliyun_save_dir" placeholder="默认 root"></el-input></el-form-item>
+                                            <el-button type="success" plain @click="generateAliyunQrCode" :loading="aliyunQrLoading">扫码获取 Token</el-button>
+                                            <div v-if="aliyunQrUrl" class="qr-result"><img :src="aliyunQrUrl" class="qr-img"><p class="qr-status">{{ aliyunQrStatus }}</p></div>
+                                            <p v-else-if="aliyunQrStatus" class="qr-status">{{ aliyunQrStatus }}</p>
+                                        </el-form>
+                                    </div>
+                                    <div class="settings-panel">
+                                        <div class="settings-panel-head"><h3>115网盘</h3><el-tag :type="getDriveConfigStatus('115').ready ? 'success' : 'warning'" size="small">{{ getDriveConfigStatus('115').ready ? '已配置' : '待配置' }}</el-tag></div>
+                                        <el-form label-position="top">
+                                            <el-form-item label="115 Cookie"><el-input v-model="config.cookie_115" type="textarea" :rows="3" disabled></el-input></el-form-item>
+                                            <el-form-item label="默认保存目录 ID"><el-input v-model="config.drive115_save_dir" placeholder="默认 0"></el-input></el-form-item>
+                                            <el-button type="primary" plain @click="generate115QrCode" :loading="qrLoading">生成二维码</el-button>
+                                            <div v-if="qUrl" class="qr-result"><img :src="qUrl" class="qr-img"><p class="qr-status">{{ qSt }}</p></div>
+                                        </el-form>
+                                    </div>
+                                    <div class="settings-panel">
+                                        <div class="settings-panel-head"><h3>123云盘</h3><el-tag :type="getDriveConfigStatus('123').ready ? 'success' : 'warning'" size="small">{{ getDriveConfigStatus('123').ready ? '已配置' : '待配置' }}</el-tag></div>
+                                        <el-form label-position="top">
+                                            <el-form-item label="Client ID"><el-input v-model="config.drive123_client_id"></el-input></el-form-item>
+                                            <el-form-item label="Client Secret"><el-input v-model="config.drive123_client_secret" type="password" show-password></el-input></el-form-item>
+                                            <el-form-item label="默认保存目录 ID"><el-input v-model="config.drive123_save_dir" placeholder="默认 0"></el-input></el-form-item>
+                                        </el-form>
+                                    </div>
+                                </section>
+                            </el-tab-pane>
+
+                            <el-tab-pane label="插件与回收站">
+                                <section class="settings-section">
+                                    <div class="section-head compact">
+                                        <div>
+                                            <h3>回收站自动清空</h3>
+                                            <p>插件能力集中在配置中心，未授权网盘不会执行清空任务。</p>
+                                        </div>
+                                    </div>
+                                    <div class="plugin-recycle-form compact">
+                                        <el-form-item label="启用自动清空"><el-switch v-model="recycleConfig.enabled" active-value="1" inactive-value="0" active-text="启用" inactive-text="停用"></el-switch></el-form-item>
+                                        <el-form-item label="间隔小时"><el-input-number v-model="recycleConfig.interval_hours" :min="1" :max="720" style="width: 100%;"></el-input-number></el-form-item>
+                                        <el-form-item label="执行网盘"><el-select v-model="recycleConfig.drives" multiple collapse-tags style="width: 100%;"><el-option v-for="item in pluginDriveOptions" :key="item.value" :label="item.label" :value="item.value"></el-option></el-select></el-form-item>
+                                        <el-form-item label="115 清空密码"><el-input v-model="recycleConfig.password_115" type="password" show-password placeholder="未设置时默认 000000"></el-input></el-form-item>
+                                    </div>
+                                </section>
+                                <section class="recycle-drive-grid compact">
+                                    <article v-for="item in driveConfigCards" :key="item.type" class="recycle-drive-card">
+                                        <div class="record-card-head">
+                                            <div class="drive-mark" :class="'drive-' + item.type">{{ item.type === 'aliyun' ? '阿' : (item.type === 'quark' ? '夸' : item.type) }}</div>
+                                            <div><h3>{{ item.label }}</h3><p>{{ item.authReady ? '授权可用' : '未完成授权' }}</p></div>
+                                            <el-tag :type="item.authReady ? 'success' : 'warning'" effect="plain">{{ item.authReady ? '可读取' : '待配置' }}</el-tag>
+                                        </div>
+                                        <div class="recycle-card-actions">
+                                            <el-button size="small" type="primary" plain :loading="recycleLoading[item.type]" @click="loadRecycleItems(item.type)">读取</el-button>
+                                            <el-button size="small" type="danger" plain :disabled="!item.authReady || item.type === '123'" @click="emptyRecyclebin(item.type)">清空</el-button>
+                                        </div>
+                                        <el-table :data="getRecycleItems(item.type)" size="small" max-height="220" v-loading="recycleLoading[item.type]">
+                                            <el-table-column prop="name" label="名称" min-width="150" show-overflow-tooltip></el-table-column>
+                                            <el-table-column prop="type" label="类型" width="72"></el-table-column>
+                                        </el-table>
+                                    </article>
+                                </section>
+                            </el-tab-pane>
+                        </el-tabs>
                     </div>
 
                     <div v-if="activeMenu==='settings'" class="settings-wrapper">
@@ -471,6 +856,7 @@
                                             <el-option label="115网盘" value="115"></el-option>
                                             <el-option label="阿里云盘" value="aliyun"></el-option>
                                             <el-option label="夸克网盘" value="quark"></el-option>
+                                            <el-option label="123云盘" value="123"></el-option>
                                         </el-select>
                                     </div>
                                     <div class="form-tip">开启后，系统每天自动拉取到 TMDB 最新热门影视时，会自动将它们全部加入待搜刮的订阅队列中。</div>
@@ -489,7 +875,7 @@
                         </el-card>
                     </div>
 
-                    <div v-if="activeMenu==='settings_115'" class="settings-wrapper">
+                    <div v-if="activeMenu==='settings_115'" class="settings-wrapper drive-settings-page">
                         <h2>☁️ 网盘资产与终端节点配置</h2>
                         <el-tabs type="border-card" model-value="quark" style="min-height: 400px; box-shadow: none;">
                             <el-tab-pane label="☁️ 夸克网盘" name="quark"><div style="max-width: 800px; padding: 10px;"><el-form label-position="top"><el-form-item><template #label><strong>夸克 Cookie (必填)</strong></template><el-input v-model="config.cookie_quark" type="textarea" :rows="4"></el-input></el-form-item><el-form-item><template #label><strong>专属转存目录 ID (选填)</strong></template><el-input v-model="config.quark_save_dir"></el-input></el-form-item><el-form-item style="margin-top: 30px;"><el-button type="primary" @click="saveConfig" size="large">保存夸克配置</el-button></el-form-item></el-form></div></el-tab-pane>
@@ -516,30 +902,79 @@
                                     </el-form>
                                 </div>
                             </el-tab-pane>
-                            <el-tab-pane label="☁️ 115网盘" name="115"><div style="max-width: 800px; padding: 10px;"><el-form label-position="top"><el-form-item><template #label><strong>115 Cookie</strong></template><el-input v-model="config.cookie_115" type="textarea" :rows="3" disabled></el-input></el-form-item><div style="margin-top: 30px; text-align: center;"><el-button type="primary" @click="generate115QrCode" :loading="qrLoading" size="large">生成二维码</el-button><div v-if="qUrl" style="margin-top:20px;"><img :src="qUrl" class="qr-img"><h3 :style="{color: qSt.includes('✅')?'#67C23A':'#409EFF'}">{{qSt}}</h3></div></div></el-form></div></el-tab-pane>
-                            <el-tab-pane label="🔗 CMS 终端节点" name="cms"><div style="max-width: 800px; padding: 10px;"><el-form label-position="top"><el-form-item><template #label><strong>CMS API 地址</strong></template><el-input v-model="config.cms_api_url"></el-input></el-form-item><el-form-item><template #label><strong>CMS Token 认证</strong></template><el-input v-model="config.cms_api_token" type="password" show-password></el-input></el-form-item><el-form-item style="margin-top: 30px;"><el-button type="primary" @click="saveConfig" size="large">保存 CMS 配置</el-button></el-form-item></el-form></div></el-tab-pane>
+                            <el-tab-pane label="☁️ 115网盘" name="115"><div style="max-width: 800px; padding: 10px;"><el-form label-position="top"><el-form-item><template #label><strong>115 Cookie</strong></template><el-input v-model="config.cookie_115" type="textarea" :rows="3" disabled></el-input></el-form-item><el-form-item><template #label><strong>默认保存目录 ID</strong></template><el-input v-model="config.drive115_save_dir" placeholder="默认 0"></el-input></el-form-item><div style="margin-top: 30px; text-align: center;"><el-button type="primary" @click="generate115QrCode" :loading="qrLoading" size="large">生成二维码</el-button><div v-if="qUrl" style="margin-top:20px;"><img :src="qUrl" class="qr-img"><h3 :style="{color: qSt.includes('✅')?'#67C23A':'#409EFF'}">{{qSt}}</h3></div></div><el-form-item style="margin-top: 24px;"><el-button type="primary" @click="saveConfig" size="large">保存 115 配置</el-button></el-form-item></el-form></div></el-tab-pane>
+                            <el-tab-pane label="☁️ 123云盘" name="123"><div style="max-width: 800px; padding: 10px;"><el-form label-position="top"><el-form-item><template #label><strong>Client ID</strong></template><el-input v-model="config.drive123_client_id"></el-input></el-form-item><el-form-item><template #label><strong>Client Secret</strong></template><el-input v-model="config.drive123_client_secret" type="password" show-password></el-input></el-form-item><el-form-item><template #label><strong>默认保存目录 ID</strong></template><el-input v-model="config.drive123_save_dir" placeholder="默认 0"></el-input></el-form-item><div class="form-tip">123云盘当前支持文件管理、播放代理与 STRM；分享链接转存能力取决于 Open API 权限。</div><el-form-item style="margin-top: 30px;"><el-button type="primary" @click="saveConfig" size="large">保存 123 云盘配置</el-button></el-form-item></el-form></div></el-tab-pane>
                         </el-tabs>
                     </div>
 
-                    <div v-if="activeMenu==='logs'">
-                        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 15px;">
-                            <h2 style="margin:0">📋 系统自动化运行日志</h2>
-                            <div style="display:flex; align-items:center; gap: 15px;">
-                                <el-switch v-model="autoRefreshLogs" active-text="实时监控刷新" @change="toggleLogPoll"></el-switch>
-                                <el-button type="primary" plain circle @click="loadLogs" title="手动刷新">↻</el-button>
+                    <div v-if="activeMenu==='logs'" class="logs-page">
+                        <section class="page-toolbar">
+                            <div>
+                                <div class="page-kicker">运行日志</div>
+                                <h2>模块化日志中心</h2>
+                                <p>按功能模块、级别和时间查看后台运行状态，便于快速定位转存、播放、STRM、插件和网盘问题。</p>
+                            </div>
+                            <div class="page-toolbar-actions">
+                                <el-switch v-model="autoRefreshLogs" active-text="实时刷新" @change="toggleLogPoll"></el-switch>
+                                <el-button plain @click="resetLogFilters">重置筛选</el-button>
+                                <el-button type="primary" @click="loadLogs">
+                                    <el-icon><Refresh></Refresh></el-icon>
+                                    刷新日志
+                                </el-button>
+                            </div>
+                        </section>
+
+                        <div class="log-stats-grid">
+                            <div class="log-stat-card">
+                                <strong>{{ logStats.total }}</strong>
+                                <span>当前显示</span>
+                            </div>
+                            <div class="log-stat-card success">
+                                <strong>{{ logStats.success }}</strong>
+                                <span>成功</span>
+                            </div>
+                            <div class="log-stat-card warning">
+                                <strong>{{ logStats.warning }}</strong>
+                                <span>警告</span>
+                            </div>
+                            <div class="log-stat-card danger">
+                                <strong>{{ logStats.error }}</strong>
+                                <span>错误</span>
                             </div>
                         </div>
-                        <el-table :data="systemLogs" height="calc(100vh - 150px)" stripe border>
-                            <el-table-column prop="created_at" label="时间" width="180"></el-table-column>
-                            <el-table-column prop="level" label="级别" width="100">
-                                <template #default="s">
-                                    <el-tag :type="s.row.level==='SUCCESS'?'success':(s.row.level==='ERROR'?'danger':(s.row.level==='WARNING'?'warning':'info'))">
-                                        {{s.row.level}}
-                                    </el-tag>
-                                </template>
-                            </el-table-column>
-                            <el-table-column prop="message" label="日志详情"></el-table-column>
-                        </el-table>
+
+                        <el-card shadow="never" class="logs-filter-card">
+                            <div class="logs-filter-row">
+                                <el-radio-group v-model="logModuleFilter" @change="loadLogs">
+                                    <el-radio-button label="all">全部模块</el-radio-button>
+                                    <el-radio-button v-for="item in logModules" :key="item.module" :label="item.module">
+                                        {{ item.label }} <span class="log-module-count">{{ item.count }}</span>
+                                    </el-radio-button>
+                                </el-radio-group>
+                                <el-select v-model="logLevelFilter" style="width: 150px;" @change="loadLogs">
+                                    <el-option v-for="item in logLevelOptions" :key="item.value" :label="item.label" :value="item.value"></el-option>
+                                </el-select>
+                            </div>
+                        </el-card>
+
+                        <el-card shadow="never" class="logs-table-card">
+                            <el-table :data="systemLogs" height="calc(100vh - 360px)" stripe>
+                                <el-table-column prop="created_at" label="时间" width="170"></el-table-column>
+                                <el-table-column prop="module_label" label="模块" width="130">
+                                    <template #default="s">
+                                        <el-tag effect="plain">{{s.row.module_label || s.row.module || '系统'}}</el-tag>
+                                    </template>
+                                </el-table-column>
+                                <el-table-column prop="level" label="级别" width="105">
+                                    <template #default="s">
+                                        <el-tag :type="getLogLevelTagType(s.row.level)">
+                                            {{s.row.level}}
+                                        </el-tag>
+                                    </template>
+                                </el-table-column>
+                                <el-table-column prop="message" label="日志详情" min-width="420" show-overflow-tooltip></el-table-column>
+                            </el-table>
+                        </el-card>
                     </div>
                 </el-main>
             </el-container>
@@ -606,6 +1041,6 @@
     </div>
     
     <script src="/static/useStrm.js?v=2.0.17"></script>
-    <script src="/static/app.js?v=2.0.22"></script>
+    <script src="/static/app.js?v=2.0.33"></script>
 </body>
 </html>

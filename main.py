@@ -15,6 +15,8 @@ from scheduler import auto_subscription_task
 from logger import add_log
 from alist_sidecar import start_alist_sidecar, stop_alist_sidecar
 from alist_integration import sync_alist_storages
+from config_guard import log_startup_drive_config_status
+from plugin_recycle import router as recycle_router, auto_empty_recyclebin_if_due
 
 # 修复 Windows 注册表 MIME 类型 Bug
 mimetypes.add_type("application/javascript", ".js")
@@ -39,13 +41,16 @@ async def lifespan(app: FastAPI):
     add_log("INFO", "🚀 CineLink 核心引擎开始启动...")
     init_db()
     add_log("INFO", "✅ SQLite 数据库与数据表初始化就绪。")
+    log_startup_drive_config_status()
     start_alist_sidecar()
     sync_alist_storages()
     task = asyncio.create_task(background_task_loop())
+    recycle_task = asyncio.create_task(background_recycle_plugin_loop())
     add_log("INFO", "🌐 核心路由接口、STRM矩阵模块与静态资源加载完成。")
     add_log("INFO", "🎉 CineLink 系统启动完毕，正在监听端口请求。")
     yield
     task.cancel()
+    recycle_task.cancel()
     stop_alist_sidecar()
     add_log("WARNING", "🛑 系统收到关闭信号，后台守护进程与服务器已安全终止。")
 
@@ -63,9 +68,20 @@ async def background_task_loop():
         
         await asyncio.sleep(86400) 
 
+async def background_recycle_plugin_loop():
+    add_log("INFO", "🧩 插件守护进程已启动，回收站自动清空将按配置执行。")
+    await asyncio.sleep(15)
+    while True:
+        try:
+            await auto_empty_recyclebin_if_due()
+        except Exception as e:
+            add_log("ERROR", f"插件守护任务异常: {e}")
+        await asyncio.sleep(300)
+
 app.include_router(router)
 app.include_router(play_router)
 app.include_router(strm_router)
+app.include_router(recycle_router)
 
 if not os.path.exists("static"):
     os.makedirs("static")

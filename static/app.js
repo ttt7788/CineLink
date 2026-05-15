@@ -8,7 +8,8 @@ const app = createApp({
         const activeMenu = ref('hot'), syncingData = ref(false), loading = ref(false);
         const lm = ref([]), sr = ref([]), sq = ref(''), discoverHot = ref([]), discoverSearched = ref(false);
         const subscriptions = ref([]), records = ref([]), systemLogs = ref([]);
-        const currentPage = ref(1), pageSize = ref(30), totalItems = ref(0);
+        const transferRecordPage = ref(1), transferRecordPageSize = 10, recordGroupPages = ref({}), bindingRefreshing = ref(false);
+        const currentPage = ref(1), pageSize = ref(18), totalItems = ref(0);
         
         const selectedMediaList = ref([]);
         const selectedTableRows = ref([]);
@@ -18,7 +19,7 @@ const app = createApp({
         const drivePaths = ref([]); 
         const currentDriveType = ref(''); 
         
-        const config = ref({ api_domain: '', image_domain: '', api_key: '', pansou_domain: '', pancheck_domain: '', pancheck_enabled: '1', cookie_115: '', cookie_quark: '', token_aliyun: '', quark_save_dir: '0', aliyun_save_dir: 'root', cron_expression: '', cms_api_url: '', cms_api_token: '', auto_subscribe_new: '0', auto_subscribe_drive: '115' });
+        const config = ref({ api_domain: '', image_domain: '', api_key: '', pansou_domain: '', pancheck_domain: '', pancheck_enabled: '1', cookie_115: '', cookie_quark: '', token_aliyun: '', drive115_save_dir: '0', quark_save_dir: '0', aliyun_save_dir: 'root', drive123_client_id: '', drive123_client_secret: '', drive123_save_dir: '0', cron_expression: '', auto_subscribe_new: '0', auto_subscribe_drive: '115', magnet_download_drive: '115', ed2k_download_drive: '115' });
 
         const pv = ref(false), pr = ref({}), curKw = ref('');
         const curMedia = ref(null), savingLink = ref(false);
@@ -26,7 +27,16 @@ const app = createApp({
         const aliyunQrLoading = ref(false), aliyunQrUrl = ref(''), aliyunQrStatus = ref(''), aliyunQrToken = ref(null), aliyunQrTimer = ref(null);
 
         const autoRefreshLogs = ref(true);
+        const logModuleFilter = ref('all');
+        const logLevelFilter = ref('all');
+        const logModules = ref([]);
         const logTimer = ref(null);
+        const recycleConfig = ref({ enabled: '0', drives: ['115', 'aliyun', 'quark'], interval_hours: 24, password_115: '', last_run: '', drive_status: [] });
+        const recycleItems = ref({});
+        const recycleLoading = ref({});
+        const transferTaskForm = ref({ urls: '' });
+        const transferDownloadTasks = ref([]);
+        const transferTaskLoading = ref(false);
 
         const startLogPoll = () => {
             if (logTimer.value) clearInterval(logTimer.value);
@@ -47,21 +57,80 @@ const app = createApp({
             else stopLogPoll();
         };
 
-        const strmModule = window.useStrm(API_BASE, ElMessage, ElMessageBox);
+        const driveConfigMeta = {
+            '115': { label: '115网盘', authKey: 'cookie_115', authLabel: '115 Cookie', saveDirKey: 'drive115_save_dir', saveDirLabel: '默认保存目录 ID', defaultRoot: '0' },
+            aliyun: { label: '阿里云盘', authKey: 'token_aliyun', authLabel: '移动端 Refresh Token', saveDirKey: 'aliyun_save_dir', saveDirLabel: '默认保存目录 ID', defaultRoot: 'root' },
+            quark: { label: '夸克网盘', authKey: 'cookie_quark', authLabel: '夸克 Cookie', saveDirKey: 'quark_save_dir', saveDirLabel: '默认保存目录 ID', defaultRoot: '0' },
+            '123': { label: '123云盘', authKey: 'drive123_client_id', authLabel: 'Client ID / Secret', saveDirKey: 'drive123_save_dir', saveDirLabel: '默认保存目录 ID', defaultRoot: '0' },
+        };
+        const isConfiguredValue = (value) => String(value || '').trim().length > 0;
+        const getDriveConfigStatus = (type) => {
+            const key = String(type || '').replace('_internal', '');
+            const meta = driveConfigMeta[key] || driveConfigMeta['115'];
+            const authReady = key === '123'
+                ? isConfiguredValue(config.value.drive123_client_id) && isConfiguredValue(config.value.drive123_client_secret)
+                : isConfiguredValue(config.value[meta.authKey]);
+            const saveDir = String(config.value[meta.saveDirKey] || meta.defaultRoot || '').trim();
+            const missing = [];
+            if (!authReady) missing.push(meta.authLabel);
+            if (!isConfiguredValue(saveDir)) missing.push(meta.saveDirLabel);
+            return {
+                type: key,
+                ...meta,
+                authReady,
+                saveDirReady: isConfiguredValue(saveDir),
+                saveDir,
+                missing,
+                ready: authReady && isConfiguredValue(saveDir),
+            };
+        };
+        const driveConfigCards = computed(() => ['115', 'aliyun', 'quark', '123'].map(type => getDriveConfigStatus(type)));
+        const currentDriveStatus = computed(() => getDriveConfigStatus(currentDriveType.value || '115'));
+        const pluginDriveOptions = computed(() => driveConfigCards.value.map(item => ({ label: item.label, value: item.type, ready: item.authReady })));
+        const requireDriveReady = (type, feature = '该功能') => {
+            const status = getDriveConfigStatus(type);
+            if (status.ready) return true;
+            const missing = [];
+            if (!status.authReady) missing.push(status.authLabel);
+            if (!status.saveDirReady) missing.push(status.saveDirLabel);
+            ElMessage.warning(`${status.label} 未配置完整：${missing.join('、')}，${feature}已停止执行`);
+            return false;
+        };
+
+        const strmModule = window.useStrm(API_BASE, ElMessage, ElMessageBox, { requireDriveReady, getDriveConfigStatus });
 
         const getMenuTitle = (key) => ({ hot: '今日热门影视', movie: '本地电影库', tv: '本地剧集库', discover: '全网聚合搜索' }[key] || '');
+        const mediaPageMeta = computed(() => ({
+            hot: { kicker: '发现资源', title: '今日热门', desc: '聚合当前热度较高的影视内容，适合快速搜盘、转存和入库。', tone: 'hot' },
+            movie: { kicker: '本地库', title: '全部电影库', desc: '浏览已同步的电影条目，按需搜索网盘资源并转存到指定目录。', tone: 'movie' },
+            tv: { kicker: '本地库', title: '全部剧集库', desc: '集中管理剧集资源，转存后可绑定网盘目录用于后续追更。', tone: 'tv' },
+        }[activeMenu.value] || { kicker: '媒体库', title: getMenuTitle(activeMenu.value), desc: '', tone: 'default' }));
         const discoverQuickKeywords = ref(['4K 杜比视界', '国配 动作', '科幻 2025', '豆瓣高分', '喜剧 合家欢', '悬疑 犯罪', '动画 电影', '韩剧 最新']);
         const discoverHotStats = computed(() => {
             const items = discoverHot.value || [];
             const movies = items.filter(i => (i.media_type || 'movie') === 'movie').length;
             return { total: items.length, movies, tv: Math.max(items.length - movies, 0) };
         });
+        const mediaLibraryStats = computed(() => {
+            const items = lm.value || [];
+            const tv = items.filter(i => (i.media_type || activeMenu.value) === 'tv').length;
+            const transferred = items.filter(i => i.sub_status === 'success').length;
+            return {
+                total: totalItems.value || items.length,
+                current: items.length,
+                movie: Math.max(items.length - tv, 0),
+                tv,
+                transferred,
+            };
+        });
         const driveMeta = {
             '115': { label: '115网盘', tag: 'info', icon: '115' },
             aliyun: { label: '阿里云盘', tag: 'primary', icon: '阿' },
             quark: { label: '夸克网盘', tag: 'success', icon: '夸' },
+            '123': { label: '123云盘', tag: 'warning', icon: '123' },
+            baidu: { label: '百度网盘', tag: 'info', icon: '百' },
         };
-        const driveOrder = ['115', 'aliyun', 'quark'];
+        const driveOrder = ['115', 'aliyun', 'quark', '123'];
         const normalizeDriveType = (driveType) => driveType || '115';
         const buildDriveGroups = (items) => {
             const source = items || [];
@@ -84,6 +153,41 @@ const app = createApp({
             const tv = items.filter(item => item.media_type === 'tv').length;
             return { total: items.length, movie: Math.max(items.length - tv, 0), tv };
         });
+        const getRecordGroupPage = (type) => Number(recordGroupPages.value[type] || 1);
+        const setRecordGroupPage = (type, page) => {
+            recordGroupPages.value = { ...recordGroupPages.value, [type]: page };
+        };
+        const pagedRecordGroups = computed(() => recordGroups.value.map(group => {
+            const total = group.items.length;
+            const maxPage = Math.max(Math.ceil(total / transferRecordPageSize), 1);
+            const page = Math.min(Math.max(getRecordGroupPage(group.type), 1), maxPage);
+            const start = (page - 1) * transferRecordPageSize;
+            return {
+                ...group,
+                allItems: group.items,
+                items: group.items.slice(start, start + transferRecordPageSize),
+                total,
+                page,
+                rangeText: total ? `${start + 1}-${Math.min(start + transferRecordPageSize, total)} / ${total}` : '0 / 0',
+            };
+        }));
+        const recordPageRangeText = computed(() => {
+            if (!records.value.length) return '暂无转存记录';
+            const start = (transferRecordPage.value - 1) * transferRecordPageSize + 1;
+            const end = Math.min(transferRecordPage.value * transferRecordPageSize, records.value.length);
+            return `当前显示 ${start}-${end} / ${records.value.length} 条`;
+        });
+        const getSeriesBindingText = (row) => {
+            if (row.media_type !== 'tv') return '电影无需追更';
+            if (!row.cloud_path) return '未绑定，点击右上刷新';
+            return `${row.cloud_path} · 已识别 ${Number(row.latest_episode_count || 0)} 集`;
+        };
+        const getRecordGroupSummary = (group) => {
+            const items = group.allItems || group.items || [];
+            const tvItems = items.filter(item => item.media_type === 'tv');
+            const bound = tvItems.filter(item => item.cloud_path).length;
+            return `${items.length} 条成功记录，剧集已绑定 ${bound} / 未绑定 ${Math.max(tvItems.length - bound, 0)}`;
+        };
         const panSearchStats = computed(() => {
             const groups = Object.values(pr.value || {});
             const rows = groups.flatMap(items => items || []);
@@ -134,11 +238,196 @@ const app = createApp({
         
         const handlePageChange = (val) => loadLocalMedia(activeMenu.value, val);
         const loadSubscriptions = async () => { try { const r = await axios.get(`${API_BASE}/subscriptions`, { params: { status: 'pending' } }); subscriptions.value = r.data; } catch (e) {} };
-        const loadRecords = async () => { try { const r = await axios.get(`${API_BASE}/subscriptions`, { params: { status: 'success' } }); records.value = r.data; } catch (e) {} };
-        const loadLogs = async () => { try { const r = await axios.get(`${API_BASE}/logs`); systemLogs.value = r.data; } catch (e) {} };
+        const loadRecords = async () => { try { const r = await axios.get(`${API_BASE}/subscriptions`, { params: { status: 'success' } }); records.value = r.data; recordGroupPages.value = {}; transferRecordPage.value = 1; } catch (e) {} };
+        const loadTransferDownloadTasks = async () => {
+            transferTaskLoading.value = true;
+            try {
+                const r = await axios.get(`${API_BASE}/transfer_download/tasks`, { params: { limit: 200 } });
+                transferDownloadTasks.value = Array.isArray(r.data) ? r.data : [];
+            } catch (e) {
+                ElMessage.error('读取转存下载任务失败');
+            } finally {
+                transferTaskLoading.value = false;
+            }
+        };
+        const detectTransferLinkType = (url) => {
+            const link = String(url || '').trim().toLowerCase();
+            if (link.startsWith('magnet:?')) return 'magnet';
+            if (link.startsWith('ed2k://')) return 'ed2k';
+            if (link.includes('pan.baidu.com')) return 'baidu';
+            if (link.includes('pan.quark.cn')) return 'quark';
+            if (link.includes('alipan.com') || link.includes('aliyundrive.com')) return 'aliyun';
+            if (link.includes('123pan.com') || link.includes('123684.com')) return '123';
+            if (link.includes('115.com/s/') || link.includes('115cdn.com/s/')) return '115';
+            return 'unknown';
+        };
+        const getTransferTaskTypeLabel = (row) => {
+            if (row.link_type === 'magnet') return '磁力';
+            if (row.link_type === 'ed2k') return 'ED2K';
+            return '分享链接';
+        };
+        const getTransferTaskStatusType = (status) => {
+            if (status === 'success') return 'success';
+            if (status === 'failed') return 'danger';
+            if (status === 'running') return 'warning';
+            return 'info';
+        };
+        const submitTransferDownloadTasks = async () => {
+            const urls = String(transferTaskForm.value.urls || '').split(/\r?\n/).map(v => v.trim()).filter(Boolean);
+            if (!urls.length) return ElMessage.warning('请先粘贴网盘分享链接、磁力或 ED2K');
+            transferTaskLoading.value = true;
+            let successCount = 0;
+            for (const url of urls) {
+                const linkType = detectTransferLinkType(url);
+                let driveType = transferTaskForm.value.drive_type || '';
+                if (!driveType && linkType === 'magnet') driveType = config.value.magnet_download_drive || '115';
+                if (!driveType && linkType === 'ed2k') driveType = config.value.ed2k_download_drive || '115';
+                try {
+                    const r = await axios.post(`${API_BASE}/transfer_download/tasks`, {
+                        url,
+                        drive_type: driveType
+                    });
+                    if (r.data.code === 202) successCount += 1;
+                    else ElMessage.warning(r.data.message || '任务添加失败');
+                } catch (e) {
+                    ElMessage.error(e.response?.data?.message || e.response?.data?.detail || '任务添加失败');
+                }
+            }
+            transferTaskLoading.value = false;
+            if (successCount) {
+                ElMessage.success(`已添加 ${successCount} 个任务`);
+                transferTaskForm.value.urls = '';
+                loadTransferDownloadTasks();
+            }
+        };
+        const retryTransferDownloadTask = async (row) => {
+            try {
+                const r = await axios.post(`${API_BASE}/transfer_download/tasks/${row.id}/retry`);
+                ElMessage.success(r.data.message || '已重新提交');
+                loadTransferDownloadTasks();
+            } catch (e) {
+                ElMessage.error(e.response?.data?.message || e.response?.data?.detail || '重试失败');
+            }
+        };
+        const deleteTransferDownloadTask = async (row) => {
+            try {
+                await ElMessageBox.confirm('删除这条转存下载任务记录？', '确认', { type: 'warning' });
+                await axios.delete(`${API_BASE}/transfer_download/tasks/${row.id}`);
+                ElMessage.success('已删除');
+                loadTransferDownloadTasks();
+            } catch (e) {}
+        };
+        const logLevelOptions = [
+            { label: '全部级别', value: 'all' },
+            { label: '成功', value: 'SUCCESS' },
+            { label: '错误', value: 'ERROR' },
+            { label: '警告', value: 'WARNING' },
+            { label: '信息', value: 'INFO' },
+        ];
+        const logStats = computed(() => {
+            const rows = systemLogs.value || [];
+            return {
+                total: rows.length,
+                error: rows.filter(row => row.level === 'ERROR').length,
+                warning: rows.filter(row => row.level === 'WARNING' || row.level === 'WARN').length,
+                success: rows.filter(row => row.level === 'SUCCESS').length,
+            };
+        });
+        const getLogLevelTagType = (level) => {
+            if (level === 'SUCCESS') return 'success';
+            if (level === 'ERROR') return 'danger';
+            if (level === 'WARNING' || level === 'WARN') return 'warning';
+            return 'info';
+        };
+        const loadLogModules = async () => {
+            try {
+                const r = await axios.get(`${API_BASE}/logs/modules`);
+                logModules.value = Array.isArray(r.data) ? r.data : [];
+            } catch (e) {
+                logModules.value = [];
+            }
+        };
+        const loadLogs = async () => {
+            try {
+                const r = await axios.get(`${API_BASE}/logs`, {
+                    params: {
+                        limit: 200,
+                        module: logModuleFilter.value,
+                        level: logLevelFilter.value,
+                    }
+                });
+                systemLogs.value = Array.isArray(r.data) ? r.data : [];
+                loadLogModules();
+            } catch (e) {}
+        };
+        const resetLogFilters = () => {
+            logModuleFilter.value = 'all';
+            logLevelFilter.value = 'all';
+            loadLogs();
+        };
+        const loadRecycleConfig = async () => {
+            try {
+                const r = await axios.get(`${API_BASE}/plugins/recycle/config`);
+                recycleConfig.value = { ...recycleConfig.value, ...r.data, drives: r.data.drives || [] };
+            } catch (e) {
+                ElMessage.error('读取回收站插件配置失败');
+            }
+        };
+        const saveRecycleConfig = async () => {
+            try {
+                await axios.post(`${API_BASE}/plugins/recycle/config`, recycleConfig.value);
+                ElMessage.success('回收站插件配置已保存');
+                loadRecycleConfig();
+            } catch (e) {
+                ElMessage.error(e.response?.data?.detail || '保存回收站插件配置失败');
+            }
+        };
+        const getRecycleItems = (type) => recycleItems.value[type] || [];
+        const loadRecycleItems = async (type) => {
+            recycleLoading.value = { ...recycleLoading.value, [type]: true };
+            try {
+                const r = await axios.post(`${API_BASE}/plugins/recycle/list`, { drive_type: type });
+                if (r.data.code === 200) {
+                    recycleItems.value = { ...recycleItems.value, [type]: r.data.data || [] };
+                } else {
+                    recycleItems.value = { ...recycleItems.value, [type]: [] };
+                    ElMessage.warning(r.data.msg || '读取回收站失败');
+                }
+            } catch (e) {
+                recycleItems.value = { ...recycleItems.value, [type]: [] };
+                ElMessage.error(e.response?.data?.detail || e.response?.data?.msg || '读取回收站失败');
+            } finally {
+                recycleLoading.value = { ...recycleLoading.value, [type]: false };
+            }
+        };
+        const emptyRecyclebin = async (type) => {
+            try {
+                await ElMessageBox.confirm(`确定清空 ${getDriveLabel(type)} 回收站？该操作不可恢复。`, '危险操作', { type: 'danger' });
+                const r = await axios.post(`${API_BASE}/plugins/recycle/empty`, { drive_type: type });
+                if (r.data.code === 200) {
+                    ElMessage.success(r.data.msg || '清空任务已提交');
+                    loadRecycleItems(type);
+                } else {
+                    ElMessage.error(r.data.msg || '清空失败');
+                }
+            } catch (e) {
+                if (e !== 'cancel' && e !== 'close') ElMessage.error(e.response?.data?.detail || e.response?.data?.msg || '清空失败');
+            }
+        };
 
         const fetchDriveFiles = async (parentId) => { driveLoading.value = true; try { const r = await axios.post(`${API_BASE}/drive/list`, { drive_type: currentDriveType.value, parent_id: parentId }); if(r.data.code === 200) driveFiles.value = r.data.data; else ElMessage.error(r.data.msg); } finally { driveLoading.value = false; } };
-        const initDriveView = (type) => { currentDriveType.value = type; const rootId = (type === 'quark' || type === '115') ? '0' : 'root'; drivePaths.value = [{ id: rootId, name: '全部文件' }]; fetchDriveFiles(rootId); };
+        const initDriveView = (type) => {
+            currentDriveType.value = type;
+            if (!requireDriveReady(type, '网盘文件管理')) {
+                driveFiles.value = [];
+                drivePaths.value = [];
+                return;
+            }
+            const status = getDriveConfigStatus(type);
+            const rootId = status.saveDir || status.defaultRoot || (type === 'aliyun' ? 'root' : '0');
+            drivePaths.value = [{ id: rootId, name: '挂载目录' }];
+            fetchDriveFiles(rootId);
+        };
         const clickDriveBreadcrumb = (index) => { drivePaths.value = drivePaths.value.slice(0, index + 1); fetchDriveFiles(drivePaths.value[index].id); };
         const openDriveFolder = (row) => { if (!row.is_folder) return; drivePaths.value.push({ id: row.id, name: row.name }); fetchDriveFiles(row.id); };
         const promptMkdir = async () => { try { const { value } = await msgBox.prompt('请输入文件夹名称', '新建'); if (value) { const pid = drivePaths.value[drivePaths.value.length - 1].id; const r = await axios.post(`${API_BASE}/drive/action`, { drive_type: currentDriveType.value, action: 'mkdir', file_id: pid, new_name: value }); if (r.data.code === 200) fetchDriveFiles(pid); } } catch(e){} };
@@ -151,6 +440,7 @@ const app = createApp({
             selectedTableRows.value = [];
             
             if (i === 'logs') {
+                loadLogModules();
                 loadLogs();
                 startLogPoll();
             } else {
@@ -167,14 +457,18 @@ const app = createApp({
             }
 
             if(['hot', 'movie', 'tv'].includes(i)) { currentPage.value = 1; loadLocalMedia(i, 1); }
+            else if(i === 'transfer_task_add' || i === 'transfer_download_records') loadTransferDownloadTasks();
             else if(i === 'subscriptions') loadSubscriptions();
             else if(i === 'records') loadRecords();
             else if(i === 'drive_quark') initDriveView('quark');
             else if(i === 'drive_aliyun') initDriveView('aliyun');
             else if(i === 'drive_115') initDriveView('115');
+            else if(i === 'drive_123') initDriveView('123');
+            else if(i === 'settings_center') loadRecycleConfig();
             else if(i === 'discover') { if (!discoverHot.value.length) loadDiscoverHot(); }
             else if(i === 'strm_configs') strmModule.loadStrmConfigs();
             else if(i === 'strm_records') { strmModule.recordPage.value = 1; strmModule.loadStrmRecords(); }
+            else if(i === 'strm_tools') { strmModule.loadStrmConfigs(); strmModule.loadStrmTasks(); strmModule.loadStrmSettings(); }
             else if(i === 'strm_tasks') { strmModule.loadStrmConfigs(); strmModule.loadStrmTasks(); }
             else if(i === 'strm_settings') strmModule.loadStrmSettings();
         };
@@ -198,12 +492,12 @@ const app = createApp({
         const isMediaSelected = (i) => selectedMediaList.value.some(m => (m.tmdb_id || m.id) === (i.tmdb_id || i.id));
         const toggleMediaSelect = (i, val) => { if (val) selectedMediaList.value.push(i); else selectedMediaList.value = selectedMediaList.value.filter(m => (m.tmdb_id || m.id) !== (i.tmdb_id || i.id)); };
 
-        const subscribe = async (i, isL, force = false, driveType = '115') => { try { const r = await axios.post(`${API_BASE}/subscribe`, { tmdb_id: isL ? i.tmdb_id : i.id, media_type: i.media_type || 'movie', title: i.title || i.name, overview: i.overview, poster_path: i.poster_path, force: force, drive_type: driveType }); if (r.data.code === 409) { const dn = driveType==='quark'?'夸克':(driveType==='aliyun'?'阿里云':'115'); await ElMessageBox.confirm(`已在系统中！强制加入 [${dn}]？`, '提醒', {type: 'warning'}); await subscribe(i, isL, true, driveType); return; } ElMessage.success(`加入队列！`); i.sub_status = 'pending'; if(activeMenu.value === 'records') loadRecords(); } catch (e) {} };
-        const batchSubscribe = async (driveType = '115') => { if (!selectedMediaList.value.length) return; const items = selectedMediaList.value.map(i => ({ tmdb_id: i.tmdb_id || i.id, media_type: i.media_type || 'movie', title: i.title || i.name, overview: i.overview || '', poster_path: i.poster_path || '', force: false, drive_type: driveType })); try { await axios.post(`${API_BASE}/subscribe/batch`, { items }); ElMessage.success(`批量操作成功！`); selectedMediaList.value = []; if(activeMenu.value === 'discover') searchTMDB(); else loadLocalMedia(activeMenu.value, currentPage.value); } catch (e) {} };
+        const subscribe = async (i, isL, force = false, driveType = '115') => { if (!requireDriveReady(driveType, '订阅转存')) return; try { const r = await axios.post(`${API_BASE}/subscribe`, { tmdb_id: isL ? i.tmdb_id : i.id, media_type: i.media_type || 'movie', title: i.title || i.name, overview: i.overview, poster_path: i.poster_path, force: force, drive_type: driveType }); if (r.data.code === 409) { const dn = getDriveLabel(driveType); await ElMessageBox.confirm(`已在系统中，是否强制加入 [${dn}]？`, '提醒', {type: 'warning'}); await subscribe(i, isL, true, driveType); return; } ElMessage.success(`已加入队列`); i.sub_status = 'pending'; if(activeMenu.value === 'records') loadRecords(); } catch (e) {} };
+        const batchSubscribe = async (driveType = '115') => { if (!selectedMediaList.value.length || !requireDriveReady(driveType, '批量订阅转存')) return; const items = selectedMediaList.value.map(i => ({ tmdb_id: i.tmdb_id || i.id, media_type: i.media_type || 'movie', title: i.title || i.name, overview: i.overview || '', poster_path: i.poster_path || '', force: false, drive_type: driveType })); try { await axios.post(`${API_BASE}/subscribe/batch`, { items }); ElMessage.success(`批量操作成功`); selectedMediaList.value = []; if(activeMenu.value === 'discover') searchTMDB(); else loadLocalMedia(activeMenu.value, currentPage.value); } catch (e) {} };
         const handleSelectionChange = (val) => { selectedTableRows.value = val; };
         const unsubscribeMedia = async (r) => { try { await ElMessageBox.confirm(`放弃订阅吗？`, '确认'); await axios.delete(`${API_BASE}/subscriptions/${r.tmdb_id}`); loadSubscriptions(); } catch (e) {} };
         const deleteRecord = async (r) => { try { await ElMessageBox.confirm(`清除此记录？`, '确认', { type: 'danger' }); await axios.delete(`${API_BASE}/subscriptions/${r.tmdb_id}`); loadRecords(); } catch (e) {} };
-        const batchDeleteRecords = async () => { if (!selectedTableRows.value.length) return; try { await ElMessageBox.confirm(`删除记录？`, '确认', { type: 'danger' }); await axios.post(`${API_BASE}/subscriptions/batch_delete`, { tmdb_ids: selectedTableRows.value.map(r => r.tmdb_id) }); ElMessage.success('清理成功！'); selectedTableRows.value = []; if (activeMenu.value === 'subscriptions') loadSubscriptions(); else if (activeMenu.value === 'records') loadRecords(); } catch (e) {} };
+        const batchDeleteRecords = async () => { if (!selectedTableRows.value.length) return; try { await ElMessageBox.confirm(`删除选中记录？`, '确认', { type: 'danger' }); await axios.post(`${API_BASE}/subscriptions/batch_delete`, { tmdb_ids: selectedTableRows.value.map(r => r.tmdb_id) }); ElMessage.success('清理成功'); selectedTableRows.value = []; if (activeMenu.value === 'subscriptions') loadSubscriptions(); else if (activeMenu.value === 'records') loadRecords(); } catch (e) {} };
 
         const openPanSou = async (i) => { if (!i) return; curMedia.value = i; const t = i.title || i.name; curKw.value = t; pr.value = {}; pv.value = true; ElMessage.info(`正在拉取...`); try { const r = await axios.get(`${API_BASE}/pansou_search`, { params: { kw: t } }); let d = r.data; if (d && d.data && d.data.merged_by_type) d = d.data; pr.value = d.merged_by_type || d || {}; } catch(e){} };
         const inferDriveType = (rawType, url) => {
@@ -211,6 +505,7 @@ const app = createApp({
             const link = String(url || '').toLowerCase();
             if (rt.includes('quark') || link.includes('pan.quark.cn')) return 'quark';
             if (rt.includes('aliyun') || rt.includes('alipan') || link.includes('alipan.com') || link.includes('aliyundrive.com')) return 'aliyun';
+            if (rt.includes('123') || link.includes('123pan.com')) return '123';
             return '115';
         };
         const canCheckLink = (rawType, row) => {
@@ -354,6 +649,19 @@ const app = createApp({
         watch(pr, () => {
             if (pv.value) setTimeout(checkSearchResults, 0);
         });
+
+        const refreshSeriesBindings = async () => {
+            bindingRefreshing.value = true;
+            try {
+                const r = await axios.post(`${API_BASE}/series_bindings/rebuild`);
+                ElMessage.success(r.data.message || '已开始刷新剧集绑定');
+                setTimeout(loadRecords, 1200);
+            } catch (e) {
+                ElMessage.error('刷新剧集绑定失败：' + (e.response?.data?.detail || e.message));
+            } finally {
+                bindingRefreshing.value = false;
+            }
+        };
         
         const runTaskManual = async () => { 
             try { 
@@ -380,20 +688,20 @@ const app = createApp({
                 } else if (st === 1) {
                     qSt.value = '已扫码，请在手机上点击确认登录';
                 } else if (st === 2) {
-                    qSt.value = '✅ 登录成功，正在提取 Cookie...';
+                    qSt.value = '登录成功，正在提取 Cookie...';
                     clearInterval(pTimer.value);
                     pTimer.value = null;
                     await axios.post(`${API_BASE}/115/login`, { uid: qTok.value.uid });
-                    ElMessage.success('115 网盘授权成功！');
+                    ElMessage.success('115 网盘授权成功');
                     loadConfig(); 
                     qUrl.value = ''; 
                 } else if (st === -1 || st === -2) {
-                    qSt.value = '❌ 二维码已过期或失效，请重新生成';
+                    qSt.value = '二维码已过期或失效，请重新生成';
                     clearInterval(pTimer.value);
                     pTimer.value = null;
                 }
             } catch (e) {
-                // 网络抖动静默处理
+                // 网络抖动时静默处理
             }
         };
 
@@ -416,7 +724,7 @@ const app = createApp({
                 }
             } catch (e) {
                 qSt.value = '二维码请求失败';
-                ElMessage.error('无法获取115二维码: ' + (e.response?.data?.detail || e.message));
+                ElMessage.error('无法获取 115 二维码：' + (e.response?.data?.detail || e.message));
             } finally {
                 qrLoading.value = false;
             }
@@ -494,11 +802,13 @@ const app = createApp({
         });
 
         return { 
-            activeMenu, syncingData, loading, lm, sr, sq, discoverHot, discoverSearched, discoverQuickKeywords, discoverHotStats, subscriptions, subscriptionGroups, subscriptionTotal, records, recordGroups, transferRecordTotal, recordStats, panSearchStats, systemLogs, config, pv, pr, qrLoading, qUrl, qSt, aliyunQrLoading, aliyunQrUrl, aliyunQrStatus, curKw, currentPage, pageSize, totalItems,
+            activeMenu, syncingData, loading, lm, sr, sq, discoverHot, discoverSearched, discoverQuickKeywords, discoverHotStats, mediaPageMeta, mediaLibraryStats, subscriptions, subscriptionGroups, subscriptionTotal, records, recordGroups, pagedRecordGroups, transferRecordPage, transferRecordPageSize, recordGroupPages, getRecordGroupPage, setRecordGroupPage, recordPageRangeText, bindingRefreshing, transferRecordTotal, recordStats, panSearchStats, systemLogs, config, pv, pr, qrLoading, qUrl, qSt, aliyunQrLoading, aliyunQrUrl, aliyunQrStatus, curKw, currentPage, pageSize, totalItems,
             selectedMediaList, selectedTableRows, isMediaSelected, toggleMediaSelect, batchSubscribe, handleSelectionChange, batchDeleteRecords,
-            driveFiles, driveLoading, drivePaths, currentDriveType, formatFileSize, clickDriveBreadcrumb, openDriveFolder, promptMkdir, promptRename, deleteDriveFile,
-            getMenuTitle, getDriveLabel, getDriveTagType, getMediaTypeLabel, getDriveTypeName, getDriveTypeClass, getDriveTypeIcon, handleMenuSelect, saveConfig, searchTMDB, useDiscoverKeyword, subscribe, unsubscribeMedia, deleteRecord, openPanSou, manualSaveLink, checkLinkStatus, isTransferType, getCheckTagType, getCheckLabel, generate115QrCode, generateAliyunQrCode, loadLogs, runTaskManual, handlePageChange,
-            autoRefreshLogs, toggleLogPoll, 
+            driveFiles, driveLoading, drivePaths, currentDriveType, currentDriveStatus, driveConfigCards, pluginDriveOptions, getDriveConfigStatus, requireDriveReady, formatFileSize, clickDriveBreadcrumb, openDriveFolder, promptMkdir, promptRename, deleteDriveFile,
+            recycleConfig, recycleItems, recycleLoading, loadRecycleConfig, saveRecycleConfig, loadRecycleItems, emptyRecyclebin, getRecycleItems,
+            transferTaskForm, transferDownloadTasks, transferTaskLoading, loadTransferDownloadTasks, submitTransferDownloadTasks, retryTransferDownloadTask, deleteTransferDownloadTask, detectTransferLinkType, getTransferTaskTypeLabel, getTransferTaskStatusType,
+            getMenuTitle, getDriveLabel, getDriveTagType, getMediaTypeLabel, getDriveTypeName, getDriveTypeClass, getDriveTypeIcon, getSeriesBindingText, getRecordGroupSummary, handleMenuSelect, saveConfig, searchTMDB, useDiscoverKeyword, subscribe, unsubscribeMedia, deleteRecord, openPanSou, manualSaveLink, checkLinkStatus, isTransferType, getCheckTagType, getCheckLabel, generate115QrCode, generateAliyunQrCode, refreshSeriesBindings, loadLogs, loadLogModules, resetLogFilters, getLogLevelTagType, runTaskManual, handlePageChange,
+            autoRefreshLogs, toggleLogPoll, logModuleFilter, logLevelFilter, logModules, logLevelOptions, logStats,
             ...strmModule
         };
     }
@@ -506,3 +816,4 @@ const app = createApp({
 
 if (typeof ElementPlusIconsVue !== 'undefined') { for (const [key, component] of Object.entries(ElementPlusIconsVue)) { app.component(key, component); } }
 app.use(ElementPlus).mount('#app');
+

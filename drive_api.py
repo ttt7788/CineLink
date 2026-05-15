@@ -2,6 +2,8 @@ import httpx
 import datetime
 import random
 import re
+import time
+from urllib.parse import parse_qs, urlparse
 
 VALID_VIDEO_EXTS = (
     '.mp4', '.mkv', '.avi', '.mov', '.flv', '.wmv', '.ts', '.m2ts',
@@ -317,13 +319,128 @@ class Drive115:
                 return None, "115 下载地址为空"
             return url, "success"
 
+    def _extract_share_code(self, share_url: str):
+        match = re.search(r'/s/([a-zA-Z0-9]+)', share_url or "")
+        return match.group(1) if match else None
+
+    def _clean_receive_code(self, share_url: str, passcode: str = ""):
+        value = (passcode or "").strip()
+        if value.lower() in {"none", "null", "no", "n/a", "na", "-"}:
+            value = ""
+        if not value:
+            query = parse_qs(urlparse(share_url or "").query)
+            for key in ("password", "pwd", "passcode", "receive_code", "code"):
+                if query.get(key):
+                    value = query[key][0]
+                    break
+        match = re.search(r'([A-Za-z0-9]{4})', value)
+        return match.group(1) if match else value
+
+    def _share_item_id(self, item):
+        return item.get("fid") or item.get("cid") or item.get("file_id") or item.get("category_id")
+
+    def _share_item_name(self, item):
+        return item.get("n") or item.get("fn") or item.get("file_name") or item.get("category_name") or item.get("name") or ""
+
+    def _share_item_is_folder(self, item):
+        if "fid" in item and "cid" in item:
+            return False
+        if item.get("fc") is not None:
+            return str(item.get("fc")) == "0"
+        if item.get("file_category") is not None:
+            return str(item.get("file_category")) == "0"
+        return bool(item.get("cid")) and not item.get("fid")
+
+    async def get_share_file_list(self, share_url: str, passcode: str = "", cid: str = "0"):
+        share_code = self._extract_share_code(share_url)
+        if not share_code:
+            return None, "无法解析 115 分享码"
+        receive_code = self._clean_receive_code(share_url, passcode)
+        try:
+            data = self._client().share_snap({
+                "share_code": share_code,
+                "receive_code": receive_code,
+                "cid": cid or "0",
+                "limit": 1000,
+                "offset": 0,
+            })
+            if isinstance(data, dict) and data.get("state") is False:
+                return None, data.get("error") or data.get("msg") or "115 分享解析失败"
+            items = (data.get("data") or {}).get("list") or []
+            return items, "success"
+        except Exception as e:
+            return None, str(e)
+
+    async def save_share(self, share_url: str, passcode: str = "", save_dir: str = "0"):
+        if not self.cookie:
+            return False, "未配置 115 Cookie"
+        share_code = self._extract_share_code(share_url)
+        if not share_code:
+            return False, "无法解析 115 分享链接"
+        receive_code = self._clean_receive_code(share_url, passcode)
+        clean_save_dir = (save_dir or "0").split("-")[0].strip() or "0"
+
+        items, msg = await self.get_share_file_list(share_url, receive_code, "0")
+        if items is None:
+            return False, msg
+        if not items:
+            return False, "115 分享内无文件或目录"
+
+        filtered = []
+        for item in items:
+            name = self._share_item_name(item).lower()
+            if self._share_item_is_folder(item) or name.endswith(VALID_VIDEO_EXTS):
+                item_id = self._share_item_id(item)
+                if item_id:
+                    filtered.append(str(item_id))
+
+        if not filtered:
+            return False, "115 分享内未找到视频、字幕或目录"
+
+        payload = {
+            "share_code": share_code,
+            "receive_code": receive_code,
+            "file_id": ",".join(filtered),
+            "cid": clean_save_dir,
+        }
+        try:
+            client = self._client()
+            data = client.share_receive(payload)
+            ok, msg = self._format_result(data, "115 文件转存成功")
+            if ok:
+                return ok, msg
+            try:
+                data = client.share_receive_app(payload, app="android")
+                return self._format_result(data, "115 文件转存成功")
+            except Exception:
+                return ok, msg
+        except Exception as e:
+            return False, str(e)
+
+    async def add_offline_download(self, url: str, save_dir: str = "0"):
+        if not self.cookie:
+            return False, "未配置 115 Cookie"
+        if not (url or "").strip():
+            return False, "下载链接为空"
+        clean_save_dir = (save_dir or "0").split("-")[0].strip() or "0"
+        try:
+            data = self._client().offline_add_url({
+                "url": url.strip(),
+                "wp_path_id": clean_save_dir,
+            })
+            return self._format_result(data, "115 离线下载任务已提交")
+        except Exception as e:
+            return False, f"115 离线下载失败: {str(e)}"
+
     def _client(self):
         from p115client import P115Client
         return P115Client(self.cookie)
 
     def _format_result(self, data, success_msg):
-        if isinstance(data, dict) and data.get("state") is False:
-            return False, data.get("error") or data.get("msg") or "115 操作失败"
+        if isinstance(data, dict):
+            code = data.get("code") or data.get("errno") or data.get("errNo")
+            if data.get("state") is False or code not in (None, 0, "0", 200, "200"):
+                return False, data.get("error") or data.get("msg") or data.get("message") or "115 操作失败"
         return True, success_msg
 
     async def make_dir(self, parent_id: str, dir_name: str):
@@ -625,4 +742,128 @@ class AliyunDrive:
             res = await client.post(f"{self.open_api_url}/adrive/v1.0/openFile/recyclebin/trash", json={"drive_id": self.default_drive_id, "file_id": file_id}, headers=self._get_auth_header())
             data = _safe_json(res)
             return res.status_code in [200, 202], self._format_error(data, "执行完成") if res.status_code >= 400 else "执行完成"
+
+
+class Drive123Open:
+    def __init__(self, client_id: str, client_secret: str):
+        self.client_id = client_id
+        self.client_secret = client_secret
+        self.timeout = 25.0
+        self.api_url = "https://open-api.123pan.com"
+        self.access_token = None
+        self.expires_at = 0
+
+    def _format_error(self, data, default="123云盘请求失败"):
+        if not isinstance(data, dict):
+            return default
+        return str(data.get("message") or data.get("msg") or data.get("error") or data.get("code") or default)
+
+    async def _get_token(self):
+        if self.access_token and self.expires_at > time.time() + 300:
+            return True, "success"
+        if not self.client_id or not self.client_secret:
+            return False, "未配置 123云盘 Client ID / Client Secret"
+        async with httpx.AsyncClient(timeout=self.timeout) as client:
+            res = await client.post(
+                f"{self.api_url}/api/v1/access_token",
+                json={"clientID": self.client_id, "clientSecret": self.client_secret},
+                headers={"Platform": "open_platform", "Content-Type": "application/json"},
+            )
+            data = _safe_json(res)
+            if res.status_code >= 400 or data.get("code") not in (0, None):
+                return False, self._format_error(data, "123云盘 Token 获取失败")
+            token_data = data.get("data") or {}
+            token = token_data.get("accessToken")
+            if not token:
+                return False, "123云盘 Token 返回为空"
+            self.access_token = token
+            expired_at = token_data.get("expiredAt")
+            try:
+                self.expires_at = datetime.datetime.fromisoformat(str(expired_at).replace("Z", "+00:00")).timestamp()
+            except Exception:
+                self.expires_at = time.time() + 3600
+            return True, "success"
+
+    async def _headers(self):
+        ok, msg = await self._get_token()
+        if not ok:
+            return None, msg
+        return {
+            "Authorization": f"Bearer {self.access_token}",
+            "Platform": "open_platform",
+            "Content-Type": "application/json",
+        }, "success"
+
+    async def list_files(self, parent_file_id: str = "0"):
+        headers, msg = await self._headers()
+        if not headers:
+            return [], msg
+        items = []
+        last_file_id = 0
+        async with httpx.AsyncClient(timeout=self.timeout) as client:
+            while last_file_id != -1:
+                params = {"parentFileId": parent_file_id or "0", "limit": 100, "lastFileId": last_file_id}
+                res = await client.get(f"{self.api_url}/api/v2/file/list", params=params, headers=headers)
+                data = _safe_json(res)
+                if res.status_code >= 400 or data.get("code") not in (0, None):
+                    return [], self._format_error(data, "123云盘目录读取失败")
+                body = data.get("data") or {}
+                page_items = [item for item in (body.get("fileList") or []) if int(item.get("trashed") or 0) == 0]
+                items.extend(page_items)
+                next_last_file_id = int(body.get("lastFileId") if body.get("lastFileId") is not None else -1)
+                if next_last_file_id == last_file_id:
+                    break
+                last_file_id = next_last_file_id
+        return items, "success"
+
+    async def get_download_url(self, file_id: str):
+        headers, msg = await self._headers()
+        if not headers:
+            return None, msg
+        async with httpx.AsyncClient(timeout=self.timeout) as client:
+            res = await client.get(f"{self.api_url}/api/v1/direct-link/url", params={"fileID": file_id}, headers=headers)
+            data = _safe_json(res)
+            if res.status_code >= 400 or data.get("code") not in (0, None):
+                return None, self._format_error(data, "123云盘直链获取失败")
+            url = (data.get("data") or {}).get("url")
+            return (url, "success") if url else (None, "123云盘直链为空")
+
+    async def make_dir(self, parent_file_id: str, dir_name: str):
+        headers, msg = await self._headers()
+        if not headers:
+            return False, msg
+        async with httpx.AsyncClient(timeout=self.timeout) as client:
+            res = await client.post(
+                f"{self.api_url}/upload/v1/file/mkdir",
+                json={"name": dir_name, "parentID": int(parent_file_id or 0)},
+                headers=headers,
+            )
+            data = _safe_json(res)
+            return data.get("code") == 0, self._format_error(data, "执行完成") if data.get("code") else "执行完成"
+
+    async def rename(self, file_id: str, new_name: str):
+        headers, msg = await self._headers()
+        if not headers:
+            return False, msg
+        async with httpx.AsyncClient(timeout=self.timeout) as client:
+            res = await client.put(
+                f"{self.api_url}/api/v1/file/name",
+                json={"fileId": int(file_id), "fileName": new_name},
+                headers=headers,
+            )
+            data = _safe_json(res)
+            return data.get("code") == 0, self._format_error(data, "执行完成") if data.get("code") else "执行完成"
+
+    async def delete(self, file_id: str):
+        headers, msg = await self._headers()
+        if not headers:
+            return False, msg
+        async with httpx.AsyncClient(timeout=self.timeout) as client:
+            res = await client.post(
+                f"{self.api_url}/api/v1/file/trash",
+                json={"fileIDs": [int(file_id)]},
+                headers=headers,
+            )
+            data = _safe_json(res)
+            return data.get("code") == 0, self._format_error(data, "执行完成") if data.get("code") else "执行完成"
 from aliyun_drive_mobile import AliyunDrive as AliyunDrive

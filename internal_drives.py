@@ -7,7 +7,7 @@ from urllib.parse import unquote
 
 from aliyun_drive_mobile import AliyunDrive
 from database import get_sys_config
-from drive_api import Drive115, QuarkDrive
+from drive_api import Drive115, QuarkDrive, Drive123Open
 from logger import add_log
 
 
@@ -301,10 +301,78 @@ class Drive115Provider:
         return item.get("n") or item.get("fn") or item.get("name") or fallback
 
 
+class Drive123Provider:
+    def __init__(self):
+        self.cache = PathCache({"fileId": "0", "filename": "", "type": 1})
+        self.download_cache = TimedCache(DOWNLOAD_URL_CACHE_TTL)
+
+    def _drive(self):
+        cfg = get_sys_config()
+        client_id = (cfg.get("drive123_client_id") or "").strip()
+        client_secret = (cfg.get("drive123_client_secret") or "").strip()
+        return Drive123Open(client_id, client_secret) if client_id and client_secret else None
+
+    def list_children(self, parent_id):
+        cached = self.cache.children.get(parent_id)
+        if cached is not None:
+            return cached
+        drive = self._drive()
+        if not drive:
+            add_log("WARNING", "【内置网盘】未配置 123云盘 Client ID / Secret，123 暂不可浏览。")
+            return []
+        items, msg = run_async(drive.list_files(parent_id))
+        if msg != "success":
+            add_log("ERROR", f"【内置网盘】123云盘目录读取失败: {msg}")
+            return []
+        self.cache.children.set(parent_id, items)
+        return items
+
+    def resolve_item(self, path):
+        normalized = normalize_path(path)
+        cached = self.cache.get_path(normalized)
+        if cached:
+            return cached
+        parent_id = "0"
+        current_path = "/"
+        current_item = None
+        for raw_part in normalized.strip("/").split("/"):
+            part = unquote(raw_part)
+            current_item = next((item for item in self.list_children(parent_id) if self.get_name(item, "") == part), None)
+            if not current_item:
+                return None
+            current_path = join_path(current_path, part)
+            self.cache.set_path(current_path, current_item)
+            parent_id = str(current_item.get("fileId"))
+        return current_item
+
+    def get_download_url(self, file_id):
+        cached = self.download_cache.get(file_id)
+        if cached:
+            return cached
+        drive = self._drive()
+        if not drive:
+            return None
+        url, msg = run_async(drive.get_download_url(file_id))
+        if not url:
+            add_log("ERROR", f"【内置网盘】123云盘下载地址获取失败: {msg}")
+        self.download_cache.set(file_id, url)
+        return url
+
+    def get_download_headers(self):
+        return {"User-Agent": "Mozilla/5.0"}
+
+    def get_size(self, item):
+        return int(item.get("size") or 0)
+
+    def get_name(self, item, fallback):
+        return item.get("filename") or item.get("fileName") or fallback
+
+
 INTERNAL_DRIVE_PROVIDERS = {
     "115": Drive115Provider(),
     "aliyun": AliyunProvider(),
     "quark": QuarkProvider(),
+    "123": Drive123Provider(),
 }
 
 

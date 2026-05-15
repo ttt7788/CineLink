@@ -1,28 +1,60 @@
 services:
   cinelink:
-    build:
-      context: .
-      dockerfile: Dockerfile
+    # 在线构建完成后，服务器直接拉取这个镜像运行。
+    image: akjehsmhq5/cinelink:latest
+
+    # 如果你要在本机开发调试，可以临时取消下面 3 行注释并删除 image 行。
+    # build:
+    #   context: .
+    #   dockerfile: Dockerfile
+
+    # 容器名称。
     container_name: cinelink
+
+    # 异常退出或服务器重启后自动恢复。
     restart: unless-stopped
+
+    # 8000 是 CineLink Web 控制台；5244 是内置 AList。
     ports:
       - "8000:8000"
       - "5244:5244"
+
+    # /app/data 保存数据库、配置、AList 数据；/data/media 保存 STRM 输出。
     volumes:
       - ./data:/app/data
       - ./data/strm_output:/data/media
+
     environment:
+      # 容器时区。
       - TZ=Asia/Shanghai
+
+      # CineLink 数据目录，必须持久化。
       - CINELINK_DATA_DIR=/app/data
+
+      # 播放器访问 STRM 时使用的公开地址。服务器部署请改为 http://服务器IP:8000。
       - CINELINK_PLAY_PUBLIC_URL=${CINELINK_PLAY_PUBLIC_URL:-http://127.0.0.1:8000}
+
+      # STRM 文件输出目录。
       - CINELINK_STRM_OUTPUT_DIR=/data/media
+
+      # 网盘直链缓存时间，减少播放器反复探测导致的 API 请求。
       - CINELINK_DOWNLOAD_URL_CACHE_TTL=300
       - CINELINK_PATH_CACHE_TTL=3600
+
+      # 播放代理每次向播放器发送的数据块大小。
       - CINELINK_PLAY_CHUNK_SIZE=4194304
+
+      # 是否记录播放代理请求日志，排查播放卡顿时建议开启。
       - CINELINK_PLAY_LOG_REQUESTS=1
+
+      # STRM 默认生成播放代理地址，而不是裸 WebDAV 地址。
       - CINELINK_STRM_BACKEND=play
+
+      # 阿里云盘、夸克默认使用预览/转码播放地址策略。
       - CINELINK_ALIYUN_STRM_MODE=preview
       - CINELINK_QUARK_STRM_MODE=preview
+
+      # 启用内置 AList，用于网盘挂载、STRM 扫描和播放。
       - CINELINK_ALIST_ENABLED=1
       - CINELINK_ALIST_BIN=/usr/local/bin/alist
       - CINELINK_ALIST_DATA_DIR=/app/data/alist
@@ -30,7 +62,11 @@ services:
       - CINELINK_ALIST_CHECK_HOST=127.0.0.1
       - CINELINK_ALIST_PORT=5244
       - CINELINK_ALIST_INTERNAL_URL=http://127.0.0.1:5244
+
+      # AList 对外访问地址。服务器部署请改为 http://服务器IP:5244。
       - CINELINK_ALIST_PUBLIC_URL=${CINELINK_ALIST_PUBLIC_URL:-http://127.0.0.1:5244}
+
+    # 健康检查：Web 首页可访问即认为容器健康。
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8000/"]
       interval: 30s

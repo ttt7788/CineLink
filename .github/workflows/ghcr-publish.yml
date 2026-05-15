@@ -3,7 +3,7 @@ name: Publish Docker Image to GHCR
 on:
   workflow_dispatch:
   push:
-    branches: ["main"]
+    branches: ["main", "codex/docker-package-support"]
     tags: ["v*.*.*"]
 
 permissions:
@@ -35,6 +35,8 @@ jobs:
           images: ghcr.io/${{ github.repository_owner }}/cinelink
           tags: |
             type=raw,value=latest,enable={{is_default_branch}}
+            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/codex/docker-package-support' }}
+            type=ref,event=branch
             type=ref,event=tag
             type=sha
 

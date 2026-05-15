@@ -9,6 +9,7 @@ from pathlib import Path
 import requests
 
 from database import get_sys_config
+from config_guard import require_drive_ready
 from logger import add_log
 
 
@@ -216,7 +217,8 @@ def sync_alist_storages():
     cfg = get_sys_config()
     payloads = []
     quark_cookie = (cfg.get("cookie_quark") or "").strip()
-    if quark_cookie:
+    quark_ready, quark_msg = require_drive_ready("quark", cfg)
+    if quark_cookie and quark_ready:
         payloads.append(
             _storage_payload(
                 "/quark",
@@ -232,13 +234,16 @@ def sync_alist_storages():
                 },
             )
         )
+    elif quark_cookie:
+        add_log("WARNING", f"【内置AList】跳过夸克挂载同步：{quark_msg}")
 
     cloud115_cookie = (cfg.get("cookie_115") or "").strip()
     cloud115_qrcode_token = (cfg.get("alist_115_qrcode_token") or "").strip()
     cloud115_qrcode_source = (cfg.get("alist_115_qrcode_source") or "web").strip() or "web"
     cloud115_cookie_source = (cfg.get("alist_115_cookie_source") or "").strip()
     mobile_cookie_sources = {"android", "ios", "qandroid", "qios", "linux", "windows", "mac"}
-    if cloud115_qrcode_token:
+    cloud115_ready, cloud115_msg = require_drive_ready("115", cfg)
+    if cloud115_qrcode_token and cloud115_ready:
         payloads.append(
             _storage_payload(
                 "/115",
@@ -253,7 +258,7 @@ def sync_alist_storages():
                 },
             )
         )
-    elif cloud115_cookie and cloud115_cookie_source in mobile_cookie_sources:
+    elif cloud115_cookie and cloud115_cookie_source in mobile_cookie_sources and cloud115_ready:
         payloads.append(
             _storage_payload(
                 "/115",
@@ -268,7 +273,7 @@ def sync_alist_storages():
                 },
             )
         )
-    elif cloud115_cookie:
+    elif cloud115_cookie and cloud115_ready:
         payloads.append(
             _disabled_storage_payload(
                 "/115",
@@ -284,9 +289,12 @@ def sync_alist_storages():
                 "CineLink 内置 AList 自动同步：Cookie 模式被 115 判定重复登录，暂时禁用，等待扫码 Token 接入。",
             )
         )
+    elif cloud115_cookie or cloud115_qrcode_token:
+        add_log("WARNING", f"【内置AList】跳过 115 挂载同步：{cloud115_msg}")
 
     aliyun_token = (cfg.get("token_aliyun") or "").strip()
-    if aliyun_token:
+    aliyun_ready, aliyun_msg = require_drive_ready("aliyun", cfg)
+    if aliyun_token and aliyun_ready:
         drive_id = get_aliyun_drive_id(aliyun_token)
         if drive_id:
             payloads.append(
@@ -304,6 +312,29 @@ def sync_alist_storages():
                     },
                 )
             )
+    elif aliyun_token:
+        add_log("WARNING", f"【内置AList】跳过阿里云盘挂载同步：{aliyun_msg}")
+
+    drive123_client_id = (cfg.get("drive123_client_id") or "").strip()
+    drive123_client_secret = (cfg.get("drive123_client_secret") or "").strip()
+    drive123_ready, drive123_msg = require_drive_ready("123", cfg)
+    if drive123_client_id and drive123_client_secret and drive123_ready:
+        payloads.append(
+            _storage_payload(
+                "/123",
+                "123 Open",
+                {
+                    "root_folder_id": cfg.get("drive123_save_dir", "0") or "0",
+                    "client_id": drive123_client_id,
+                    "client_secret": drive123_client_secret,
+                    "private_key": "",
+                    "uid": 0,
+                    "valid_duration": 30,
+                },
+            )
+        )
+    elif drive123_client_id or drive123_client_secret:
+        add_log("WARNING", f"【内置AList】跳过 123云盘挂载同步：{drive123_msg}")
 
     for payload in payloads:
         _upsert_storage(token, existing, payload)

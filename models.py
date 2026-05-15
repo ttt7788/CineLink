@@ -9,14 +9,20 @@ class ConfigModel(BaseModel):
     pancheck_domain: Optional[str] = ""
     pancheck_enabled: Optional[str] = "1"
     cron_expression: str
-    cms_api_url: str
-    cms_api_token: str
+    cms_api_url: Optional[str] = ""
+    cms_api_token: Optional[str] = ""
     cookie_quark: Optional[str] = ""
     token_aliyun: Optional[str] = ""
+    drive123_client_id: Optional[str] = ""
+    drive123_client_secret: Optional[str] = ""
+    drive115_save_dir: Optional[str] = "0"
     quark_save_dir: Optional[str] = "0"
     aliyun_save_dir: Optional[str] = "root"
+    drive123_save_dir: Optional[str] = "0"
     auto_subscribe_new: Optional[str] = "0"  
     auto_subscribe_drive: Optional[str] = "115"  # 【新增】自动订阅的目标网盘
+    magnet_download_drive: Optional[str] = "115"
+    ed2k_download_drive: Optional[str] = "115"
 
 class SubscribeModel(BaseModel):
     tmdb_id: int
@@ -49,6 +55,12 @@ class LinkCheckModel(BaseModel):
 
 class LinkCheckBatchModel(BaseModel):
     links: List[LinkCheckModel]
+
+class TransferDownloadTaskModel(BaseModel):
+    title: Optional[str] = ""
+    url: str
+    pwd: Optional[str] = ""
+    drive_type: Optional[str] = ""
 
 class DriveListReq(BaseModel):
     drive_type: str
@@ -83,6 +95,7 @@ class StrmConfigModel(BaseModel):
     username: str
     password: Optional[str] = ""
     rootpath: str
+    root_id: Optional[str] = ""
     target_directory: str
     download_enabled: int = 1
     update_mode: str = "incremental"

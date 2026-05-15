@@ -1,11 +1,11 @@
-const useStrm = (API_BASE, ElMessage, msgBox) => {
+const useStrm = (API_BASE, ElMessage, msgBox, options = {}) => {
     const { ref } = Vue;
 
     const strmConfigs = ref([]);
     const showStrmDialog = ref(false);
     const isEditingConfig = ref(false);
     const editingConfigId = ref(null);
-    const defaultStrmConfig = () => ({ source_type: 'webdav', config_name: '', url: '', username: '', password: '', rootpath: '', target_directory: '', update_mode: 'incremental', download_enabled: 1, download_interval_range: '1-3' });
+    const defaultStrmConfig = () => ({ source_type: 'webdav', config_name: '', url: '', username: '', password: '', rootpath: '', root_id: '', target_directory: '', update_mode: 'incremental', download_enabled: 1, download_interval_range: '1-3' });
     const newStrmConfig = ref(defaultStrmConfig());
 
     const strmRecords = ref([]);
@@ -23,22 +23,37 @@ const useStrm = (API_BASE, ElMessage, msgBox) => {
 
     const strmSettings = ref({ video_formats: '', subtitle_formats: '', image_formats: '', metadata_formats: '', size_threshold: 100, download_threads: 4 });
     const replaceTool = ref({ target_directory: '', old_domain: '', new_domain: '' });
+    const internalSourceDrive = { '115_internal': '115', aliyun_internal: 'aliyun', quark_internal: 'quark', '123_internal': '123' };
+    const requireInternalSourceReady = (sourceType, feature = 'STRM') => {
+        const drive = internalSourceDrive[sourceType];
+        if (!drive || !options.requireDriveReady) return true;
+        return options.requireDriveReady(drive, feature);
+    };
 
     const loadStrmConfigs = async () => { const r = await axios.get(`${API_BASE}/strm/configs`); strmConfigs.value = r.data; };
     const loadStrmSettings = async () => { const r = await axios.get(`${API_BASE}/strm/settings`); strmSettings.value = r.data; };
     const loadStrmTasks = async () => { const r = await axios.get(`${API_BASE}/strm/tasks`); strmTasks.value = r.data; };
     const getStrmConfigName = (id) => { const c = strmConfigs.value.find(x => x.id === id); return c ? c.config_name : '未知节点'; };
 
-    const applyStrmSourceType = () => {
+    const getInternalDefaultRootId = (sourceType) => {
+        const drive = internalSourceDrive[sourceType];
+        const status = drive && options.getDriveConfigStatus ? options.getDriveConfigStatus(drive) : null;
+        const fallback = drive === 'aliyun' ? 'root' : '0';
+        return String(status?.saveDir || fallback).split('-')[0].trim() || fallback;
+    };
+
+    const applyStrmSourceType = (force = false) => {
         const internalSources = {
             '115_internal': { rootpath: '/115', name: '115网盘内置挂载' },
             'aliyun_internal': { rootpath: '/aliyun', name: '阿里云盘内置挂载' },
             'quark_internal': { rootpath: '/quark', name: '夸克网盘内置挂载' },
+            '123_internal': { rootpath: '/123', name: '123云盘内置挂载' },
         };
         const source = internalSources[newStrmConfig.value.source_type];
         if (source) {
             newStrmConfig.value.url = 'internal://alist';
-            newStrmConfig.value.rootpath = source.rootpath;
+            if (force || !newStrmConfig.value.rootpath) newStrmConfig.value.rootpath = source.rootpath;
+            if (force || !newStrmConfig.value.root_id) newStrmConfig.value.root_id = getInternalDefaultRootId(newStrmConfig.value.source_type);
             newStrmConfig.value.username = '';
             newStrmConfig.value.password = '';
             if (!newStrmConfig.value.config_name) newStrmConfig.value.config_name = source.name;
@@ -49,19 +64,30 @@ const useStrm = (API_BASE, ElMessage, msgBox) => {
         '115_internal': '内置 115',
         aliyun_internal: '内置阿里云',
         quark_internal: '内置夸克',
+        '123_internal': '内置123云盘',
     }[sourceType || 'webdav'] || sourceType);
     const openStrmDialog = () => { isEditingConfig.value = false; newStrmConfig.value = defaultStrmConfig(); showStrmDialog.value = true; };
-    const editStrmConfig = (row) => { isEditingConfig.value = true; editingConfigId.value = row.id; newStrmConfig.value = { source_type: 'webdav', ...row }; applyStrmSourceType(); showStrmDialog.value = true; };
+    const editStrmConfig = (row) => { isEditingConfig.value = true; editingConfigId.value = row.id; newStrmConfig.value = { ...defaultStrmConfig(), ...row }; applyStrmSourceType(false); showStrmDialog.value = true; };
     const saveStrmConfig = async () => {
         try {
-            applyStrmSourceType();
+            applyStrmSourceType(false);
+            if (!requireInternalSourceReady(newStrmConfig.value.source_type, 'STRM 内置节点')) return;
             if (isEditingConfig.value) { await axios.put(`${API_BASE}/strm/configs/${editingConfigId.value}`, newStrmConfig.value); }
             else { await axios.post(`${API_BASE}/strm/configs`, newStrmConfig.value); }
             ElMessage.success('操作成功'); showStrmDialog.value = false; loadStrmConfigs();
         } catch (err) { ElMessage.error('操作失败'); }
     };
     const deleteStrmConfig = async (id) => { try { await msgBox.confirm('确定删除?'); await axios.delete(`${API_BASE}/strm/configs/${id}`); loadStrmConfigs(); } catch (e) {} };
-    const runStrmTask = async (id) => { try { await axios.post(`${API_BASE}/strm/run/${id}`); ElMessage.success('生成任务已投递至后台，请查看日志！'); } catch (e) {} };
+    const runStrmTask = async (id) => {
+        const cfg = strmConfigs.value.find(x => x.id === id);
+        if (cfg && !requireInternalSourceReady(cfg.source_type, 'STRM 生成')) return;
+        try {
+            await axios.post(`${API_BASE}/strm/run/${id}`);
+            ElMessage.success('生成任务已投递至后台，请查看日志！');
+        } catch (e) {
+            ElMessage.error(e.response?.data?.detail || 'STRM 任务启动失败');
+        }
+    };
 
     const getRecordSummaryCount = (id) => {
         if (id === 'all') return recordSummaries.value.reduce((total, item) => total + Number(item.record_count || 0), 0);

@@ -1,17 +1,40 @@
-<div v-if="activeMenu === 'strm_configs'">
-    <div style="display: flex; justify-content: space-between; margin-bottom: 20px;">
-        <h2 style="margin:0">🔗 STRM 节点管理与网盘挂载</h2>
+<div v-if="activeMenu === 'strm_configs'" class="strm-page">
+    <section class="page-toolbar">
+        <div>
+            <div class="page-kicker">STRM 管理</div>
+            <h2>STRM 节点管理与网盘挂载</h2>
+            <p>内置网盘节点会优先使用默认保存目录作为扫描目录，避免全盘扫描造成生成慢、接口压力大。</p>
+        </div>
         <el-button type="primary" @click="openStrmDialog()"><el-icon><Plus></Plus></el-icon>新增节点</el-button>
-    </div>
+    </section>
+
+    <section class="drive-config-strip">
+        <div v-for="item in driveConfigCards" :key="item.type" class="drive-config-card" :class="{ ready: item.ready, missing: !item.ready }">
+            <div class="drive-config-title">
+                <strong>{{ item.label }}</strong>
+                <el-tag :type="item.ready ? 'success' : 'warning'" size="small">{{ item.ready ? 'STRM 可用' : '待配置' }}</el-tag>
+            </div>
+            <p>默认保存目录: {{ item.saveDir || '未配置' }}</p>
+            <span>{{ item.ready ? '可创建内置 STRM 节点' : '缺少 ' + item.missing.join('、') }}</span>
+        </div>
+    </section>
+
     <el-table :data="strmConfigs" stripe border shadow="hover">
         <el-table-column prop="config_name" label="节点名称" width="150"></el-table-column>
         <el-table-column label="来源类型" width="130">
             <template #default="s">{{ formatStrmSourceType(s.row.source_type) }}</template>
         </el-table-column>
-        <el-table-column prop="url" label="来源地址" min-width="200"></el-table-column>
-        <el-table-column prop="target_directory" label="STRM 输出目录"></el-table-column>
-        <el-table-column label="更新模式" width="100">
-            <template #default="s"><el-tag :type="s.row.update_mode === 'incremental' ? 'success' : 'warning'">{{ s.row.update_mode === 'incremental' ? '增量扫描' : '全量覆盖' }}</el-tag></template>
+        <el-table-column prop="rootpath" label="挂载路径" min-width="170"></el-table-column>
+        <el-table-column prop="root_id" label="扫描目录 ID" min-width="170">
+            <template #default="s">{{ s.row.root_id || '默认根目录' }}</template>
+        </el-table-column>
+        <el-table-column prop="target_directory" label="STRM 输出目录" min-width="220"></el-table-column>
+        <el-table-column label="更新模式" width="110">
+            <template #default="s">
+                <el-tag :type="s.row.update_mode === 'incremental' ? 'success' : 'warning'">
+                    {{ s.row.update_mode === 'incremental' ? '增量扫描' : '全量覆盖' }}
+                </el-tag>
+            </template>
         </el-table-column>
         <el-table-column label="操作" width="220">
             <template #default="s">
@@ -22,38 +45,57 @@
         </el-table-column>
     </el-table>
 
-    <el-dialog v-model="showStrmDialog" :title="isEditingConfig ? '编辑节点' : '新增 STRM 节点'" width="600px" top="5vh">
+    <el-dialog v-model="showStrmDialog" :title="isEditingConfig ? '编辑节点' : '新增 STRM 节点'" width="640px" top="5vh">
         <el-form label-position="top">
             <el-form-item label="节点来源">
-                <el-radio-group v-model="newStrmConfig.source_type" @change="applyStrmSourceType">
+                <el-radio-group v-model="newStrmConfig.source_type" @change="applyStrmSourceType(true)">
                     <el-radio-button label="webdav">外部 WebDAV</el-radio-button>
                     <el-radio-button label="115_internal">内置115网盘</el-radio-button>
                     <el-radio-button label="aliyun_internal">内置阿里云盘</el-radio-button>
                     <el-radio-button label="quark_internal">内置夸克网盘</el-radio-button>
+                    <el-radio-button label="123_internal">内置123云盘</el-radio-button>
                 </el-radio-group>
             </el-form-item>
+
             <el-row :gutter="20">
-                <el-col :span="12"><el-form-item label="节点名称 (如: 115云盘)"><el-input v-model="newStrmConfig.config_name"></el-input></el-form-item></el-col>
-                <el-col :span="12"><el-form-item label="云端根目录 (如: /quark 或 /dav/media)"><el-input v-model="newStrmConfig.rootpath" :disabled="newStrmConfig.source_type !== 'webdav'"></el-input></el-form-item></el-col>
+                <el-col :span="12">
+                    <el-form-item label="节点名称">
+                        <el-input v-model="newStrmConfig.config_name" placeholder="例如：夸克电影目录"></el-input>
+                    </el-form-item>
+                </el-col>
+                <el-col :span="12">
+                    <el-form-item label="云端挂载路径">
+                        <el-input v-model="newStrmConfig.rootpath" placeholder="例如：/quark/电影"></el-input>
+                    </el-form-item>
+                </el-col>
             </el-row>
-            <el-form-item label="外部 WebDAV URL (含协议端口)"><el-input v-model="newStrmConfig.url" placeholder="http://192.168.1.100:5244" :disabled="newStrmConfig.source_type !== 'webdav'"></el-input></el-form-item>
+
+            <el-form-item v-if="newStrmConfig.source_type !== 'webdav'" label="STRM 扫描目录 ID">
+                <el-input v-model="newStrmConfig.root_id" placeholder="默认使用该网盘默认保存目录 ID；填电影/剧集目录 ID 可避免全盘扫描"></el-input>
+            </el-form-item>
+
+            <el-form-item label="外部 WebDAV URL">
+                <el-input v-model="newStrmConfig.url" placeholder="http://192.168.1.100:5244" :disabled="newStrmConfig.source_type !== 'webdav'"></el-input>
+            </el-form-item>
+
             <el-row :gutter="20" v-if="newStrmConfig.source_type === 'webdav'">
                 <el-col :span="12"><el-form-item label="账号"><el-input v-model="newStrmConfig.username"></el-input></el-form-item></el-col>
                 <el-col :span="12"><el-form-item label="密码"><el-input v-model="newStrmConfig.password" type="password"></el-input></el-form-item></el-col>
             </el-row>
-            <el-alert v-if="newStrmConfig.source_type === 'aliyun_internal'" type="info" :closable="false" show-icon title="将使用系统中已配置的阿里云 Refresh Token，通过内置 AList 与播放代理生成 STRM。"></el-alert>
-            <el-alert v-if="newStrmConfig.source_type === 'quark_internal'" type="info" :closable="false" show-icon title="将使用系统中已配置的夸克 Cookie，通过内置 AList 与播放代理生成 STRM。"></el-alert>
-            <el-alert v-if="newStrmConfig.source_type === '115_internal'" type="info" :closable="false" show-icon title="将使用系统中已配置的 115 Cookie，通过内置 AList 与播放代理生成 STRM。"></el-alert>
-            <el-form-item label="本地 STRM 输出目录"><el-input v-model="newStrmConfig.target_directory" placeholder="/data/media/115"></el-input></el-form-item>
-            
-            <el-divider content-position="left">高级比对与防风控设置</el-divider>
-            
+
+            <el-alert v-if="newStrmConfig.source_type !== 'webdav'" type="info" :closable="false" show-icon title="内置节点会按扫描目录 ID 递归生成 STRM；留空则使用该网盘默认保存目录。"></el-alert>
+            <el-form-item label="本地 STRM 输出目录">
+                <el-input v-model="newStrmConfig.target_directory" placeholder="/data/media/quark"></el-input>
+            </el-form-item>
+
+            <el-divider content-position="left">高级比对与风控设置</el-divider>
+
             <el-row :gutter="20">
                 <el-col :span="12">
                     <el-form-item label="扫描更新模式">
                         <el-select v-model="newStrmConfig.update_mode" style="width: 100%;">
-                            <el-option label="增量更新 (仅补齐新文件，极速)" value="incremental"></el-option>
-                            <el-option label="全量覆盖 (重新生成覆盖本地)" value="full"></el-option>
+                            <el-option label="增量更新" value="incremental"></el-option>
+                            <el-option label="全量覆盖" value="full"></el-option>
                         </el-select>
                     </el-form-item>
                 </el-col>
@@ -63,10 +105,13 @@
                     </el-form-item>
                 </el-col>
             </el-row>
-            <el-form-item label="网盘并发请求随机休眠 (秒, 例如: 1-3 降低风控)">
+            <el-form-item label="网盘并发请求随机休眠（秒，例如：1-3）">
                 <el-input v-model="newStrmConfig.download_interval_range"></el-input>
             </el-form-item>
         </el-form>
-        <template #footer><el-button @click="showStrmDialog = false">取消</el-button><el-button type="primary" @click="saveStrmConfig">保存配置</el-button></template>
+        <template #footer>
+            <el-button @click="showStrmDialog = false">取消</el-button>
+            <el-button type="primary" @click="saveStrmConfig">保存配置</el-button>
+        </template>
     </el-dialog>
 </div>

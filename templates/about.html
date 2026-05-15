@@ -18,6 +18,25 @@
         </div>
     </section>
 
+    <section class="about-panel">
+        <div class="section-head">
+            <div>
+                <h3>网盘配置健康状态</h3>
+                <p>系统启动和功能执行前都会检查授权与默认保存目录，缺项网盘会保持可见但不会执行转存、文件浏览或 STRM 内置任务。</p>
+            </div>
+        </div>
+        <div class="drive-config-strip">
+            <div v-for="item in driveConfigCards" :key="item.type" class="drive-config-card" :class="{ ready: item.ready, missing: !item.ready }">
+                <div class="drive-config-title">
+                    <strong>{{ item.label }}</strong>
+                    <el-tag :type="item.ready ? 'success' : 'warning'" size="small">{{ item.ready ? '已放行' : '待配置' }}</el-tag>
+                </div>
+                <p>默认保存目录: {{ item.saveDir || '未配置' }}</p>
+                <span>{{ item.ready ? '相关功能可以执行' : '缺少 ' + item.missing.join('、') }}</span>
+            </div>
+        </div>
+    </section>
+
     <section class="about-grid">
         <article class="about-card">
             <el-icon><Search></Search></el-icon>

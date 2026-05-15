@@ -4,16 +4,19 @@ import asyncio
 import base64
 import io
 import json
+import re
 import urllib.parse
 import qrcode
 import qrcode.image.svg
 from fastapi import APIRouter, HTTPException
 from database import get_db, get_sys_config
-from models import ConfigModel, SubscribeModel, BatchSubscribeModel, BatchDeleteModel, SaveLinkModel, LinkCheckModel, LinkCheckBatchModel, DriveListReq, DriveActionReq, QrcodeStatusModel, QrcodeLoginModel, AliyunQrcodeStatusModel, AliyunQrcodeLoginModel
-from logger import get_logs, add_log
-from drive_api import Drive115, QuarkDrive
+from config_guard import get_drive_config_status, require_drive_ready
+from models import ConfigModel, SubscribeModel, BatchSubscribeModel, BatchDeleteModel, SaveLinkModel, LinkCheckModel, LinkCheckBatchModel, TransferDownloadTaskModel, DriveListReq, DriveActionReq, QrcodeStatusModel, QrcodeLoginModel, AliyunQrcodeStatusModel, AliyunQrcodeLoginModel
+from logger import get_logs, get_log_modules, add_log
+from drive_api import Drive115, QuarkDrive, Drive123Open
 from aliyun_drive_mobile import AliyunDrive
 from pancheck_client import check_link_validity, infer_pancheck_platform
+from series_bindings import bind_series_after_transfer, ensure_series_target_folder, rebuild_success_series_bindings
 
 router = APIRouter()
 
@@ -31,6 +34,14 @@ UPSERT_MEDIA_SQL = '''
 @router.get("/api/config")
 def get_config(): return get_sys_config()
 
+@router.get("/api/drive/status")
+def get_drive_status():
+    config = get_sys_config()
+    return {
+        "code": 200,
+        "data": [get_drive_config_status(drive_type, config) for drive_type in ("115", "aliyun", "quark", "123")],
+    }
+
 @router.post("/api/config")
 def update_config(config: ConfigModel):
     conn = get_db()
@@ -41,9 +52,12 @@ def update_config(config: ConfigModel):
             ('pancheck_domain', config.pancheck_domain), ('pancheck_enabled', config.pancheck_enabled),
             ('cron_expression', config.cron_expression), ('cms_api_url', config.cms_api_url), 
             ('cms_api_token', config.cms_api_token), ('cookie_quark', config.cookie_quark), 
-            ('token_aliyun', config.token_aliyun), ('quark_save_dir', config.quark_save_dir), 
-            ('aliyun_save_dir', config.aliyun_save_dir), ('auto_subscribe_new', config.auto_subscribe_new),
-            ('auto_subscribe_drive', config.auto_subscribe_drive)
+            ('token_aliyun', config.token_aliyun), ('drive115_save_dir', config.drive115_save_dir),
+            ('drive123_client_id', config.drive123_client_id), ('drive123_client_secret', config.drive123_client_secret),
+            ('quark_save_dir', config.quark_save_dir), 
+            ('aliyun_save_dir', config.aliyun_save_dir), ('drive123_save_dir', config.drive123_save_dir), ('auto_subscribe_new', config.auto_subscribe_new),
+            ('auto_subscribe_drive', config.auto_subscribe_drive),
+            ('magnet_download_drive', config.magnet_download_drive), ('ed2k_download_drive', config.ed2k_download_drive)
         ]
         for key, value in fields: conn.execute("REPLACE INTO system_configs (config_key, config_value) VALUES (?, ?)", (key, value))
         conn.commit()
@@ -134,6 +148,10 @@ async def search_tmdb(query: str):
 
 @router.post("/api/subscribe")
 def subscribe(media: SubscribeModel):
+    config = get_sys_config()
+    ready, ready_msg = require_drive_ready(media.drive_type, config)
+    if not ready:
+        return {"code": 400, "message": ready_msg}
     conn = get_db()
     existing = conn.execute("SELECT status FROM subscriptions WHERE tmdb_id = ?", (media.tmdb_id,)).fetchone()
     if existing and not media.force:
@@ -148,8 +166,14 @@ def subscribe(media: SubscribeModel):
 
 @router.post("/api/subscribe/batch")
 def batch_subscribe(data: BatchSubscribeModel):
+    config = get_sys_config()
     conn = get_db(); today = datetime.date.today().isoformat(); count = 0
+    skipped = 0
     for media in data.items:
+        ready, _ = require_drive_ready(media.drive_type, config)
+        if not ready:
+            skipped += 1
+            continue
         existing = conn.execute("SELECT status FROM subscriptions WHERE tmdb_id = ?", (media.tmdb_id,)).fetchone()
         if existing and not media.force: continue
         conn.execute(UPSERT_MEDIA_SQL, (media.tmdb_id, media.media_type, media.title, media.overview, media.poster_path, today))
@@ -157,18 +181,38 @@ def batch_subscribe(data: BatchSubscribeModel):
         else: conn.execute("INSERT INTO subscriptions (tmdb_id, status, drive_type) VALUES (?, 'pending', ?)", (media.tmdb_id, media.drive_type))
         count += 1
     conn.commit(); conn.close()
-    return {"code": 200, "message": f"批量加入 {count} 个"}
+    message = f"批量加入 {count} 个"
+    if skipped:
+        message += f"，跳过 {skipped} 个未配置网盘任务"
+    return {"code": 200, "message": message}
 
 @router.get("/api/subscriptions")
 def get_subscriptions(status: str = 'pending'):
     conn = get_db()
-    rows = conn.execute("SELECT s.status, s.drive_type, m.* FROM subscriptions s JOIN media_items m ON s.tmdb_id = m.tmdb_id WHERE s.status = ? ORDER BY s.id DESC", (status,)).fetchall()
+    rows = conn.execute(
+        """
+        SELECT
+            s.status, s.drive_type,
+            b.cloud_parent_id, b.cloud_path, b.source_share_url,
+            b.latest_episode_count, b.latest_item_name, b.latest_item_updated_at, b.last_checked_at,
+            m.*
+        FROM subscriptions s
+        JOIN media_items m ON s.tmdb_id = m.tmdb_id
+        LEFT JOIN series_bindings b ON b.tmdb_id = s.tmdb_id AND b.drive_type = s.drive_type
+        WHERE s.status = ?
+        ORDER BY s.id DESC
+        """,
+        (status,),
+    ).fetchall()
     conn.close()
     return [dict(row) for row in rows]
 
 @router.delete("/api/subscriptions/{tmdb_id}")
 def unsubscribe(tmdb_id: int):
-    conn = get_db(); conn.execute("DELETE FROM subscriptions WHERE tmdb_id = ?", (tmdb_id,)); conn.commit(); conn.close()
+    conn = get_db()
+    conn.execute("DELETE FROM subscriptions WHERE tmdb_id = ?", (tmdb_id,))
+    conn.execute("DELETE FROM series_bindings WHERE tmdb_id = ?", (tmdb_id,))
+    conn.commit(); conn.close()
     return {"message": "取消"}
 
 @router.post("/api/subscriptions/batch_delete")
@@ -176,8 +220,25 @@ def batch_delete_subscriptions(data: BatchDeleteModel):
     if not data.tmdb_ids: return {"message": "无"}
     conn = get_db()
     conn.execute(f"DELETE FROM subscriptions WHERE tmdb_id IN ({','.join('?' * len(data.tmdb_ids))})", data.tmdb_ids)
+    conn.execute(f"DELETE FROM series_bindings WHERE tmdb_id IN ({','.join('?' * len(data.tmdb_ids))})", data.tmdb_ids)
     conn.commit(); conn.close()
     return {"message": "删除成功"}
+
+@router.post("/api/series_bindings/rebuild")
+async def rebuild_series_bindings_api():
+    async def run_job():
+        try:
+            result = await rebuild_success_series_bindings(only_missing=True)
+            add_log(
+                "SUCCESS" if result.get("failed", 0) == 0 else "WARNING",
+                f"【剧集绑定】后台刷新完成：处理 {result.get('processed', 0)} 条，成功 {result.get('bound', 0)} 条，失败 {result.get('failed', 0)} 条。",
+            )
+        except Exception as exc:
+            add_log("ERROR", f"【剧集绑定】后台刷新异常退出: {exc}")
+
+    add_log("INFO", "【剧集绑定】收到手动刷新请求，后台任务已创建。")
+    asyncio.create_task(run_job())
+    return {"code": 202, "message": "已开始后台刷新未绑定剧集，请稍后查看转存记录或运行日志。"}
 
 @router.get("/api/pansou_search")
 async def search_ps(kw: str):
@@ -215,7 +276,7 @@ async def api_check_links(req: LinkCheckBatchModel):
 
 @router.post("/api/save_link")
 async def api_save_link(req: SaveLinkModel):
-    from scheduler import push_to_quark, push_to_aliyun, push_to_cms
+    from scheduler import push_to_quark, push_to_aliyun, push_to_115, push_to_123
     config = get_sys_config()
     success, msg = False, ""
     drive_type = req.drive_type
@@ -224,9 +285,15 @@ async def api_save_link(req: SaveLinkModel):
         drive_type = "quark"
     elif "alipan.com" in url_lower or "aliyundrive.com" in url_lower:
         drive_type = "aliyun"
+    elif "123pan.com" in url_lower:
+        drive_type = "123"
 
     try:
         add_log("INFO", f"【手动转存】来源类型:{req.drive_type}，识别网盘:{drive_type}，链接:{req.url}")
+        ready, ready_msg = require_drive_ready(drive_type, config)
+        if not ready:
+            add_log("WARNING", f"【手动转存】{req.title} 跳过：{ready_msg}")
+            return {"code": 400, "message": ready_msg}
         if config.get('pancheck_enabled', '1') != '0' and infer_pancheck_platform(drive_type, req.url):
             check_result = await check_link_validity(req.url, drive_type, req.pwd or "", config)
             add_log("INFO", f"【链接检测】{req.title} {drive_type} -> {check_result.get('status')}，{check_result.get('message')}")
@@ -238,15 +305,47 @@ async def api_save_link(req: SaveLinkModel):
                 add_log("WARNING", f"【链接检测】{req.title} 未得到明确结果，继续尝试转存: {check_result.get('message')}")
         if drive_type == 'quark':
             save_dir = config.get('quark_save_dir', '0').split('-')[0].strip() if config.get('quark_save_dir') else "0"
+            cloud_path = None
+            if req.media_type == "tv":
+                target_id, cloud_path, folder_ok, folder_msg = await ensure_series_target_folder(drive_type, req.title, save_dir)
+                if folder_ok:
+                    save_dir = target_id
+                else:
+                    add_log("WARNING", f"【剧集绑定】{req.title} 无法创建独立剧集目录，将只转存不绑定: {folder_msg}")
+                    cloud_path = None
             success, msg = await push_to_quark(config.get('cookie_quark', ''), req.url, req.pwd, save_dir)
         elif drive_type == 'aliyun':
             save_dir = config.get('aliyun_save_dir', 'root').split('-')[0].strip() if config.get('aliyun_save_dir') else "root"
+            cloud_path = None
+            if req.media_type == "tv":
+                target_id, cloud_path, folder_ok, folder_msg = await ensure_series_target_folder(drive_type, req.title, save_dir)
+                if folder_ok:
+                    save_dir = target_id
+                else:
+                    add_log("WARNING", f"【剧集绑定】{req.title} 无法创建独立剧集目录，将只转存不绑定: {folder_msg}")
+                    cloud_path = None
             success, msg = await push_to_aliyun(config.get('token_aliyun', ''), req.url, req.pwd, save_dir)
-        else:
-            cms_url = config.get('cms_api_url', '')
-            cms_token = config.get('cms_api_token', '')
-            if not cms_url: return {"code": 400, "message": "未配置 CMS API"}
-            success, msg = await push_to_cms(cms_url, cms_token, req.url)
+        elif drive_type == '115':
+            cloud_path = None
+            save_dir = config.get('drive115_save_dir', '0').split('-')[0].strip() if config.get('drive115_save_dir') else "0"
+            if req.media_type == "tv":
+                target_id, cloud_path, folder_ok, folder_msg = await ensure_series_target_folder(drive_type, req.title, save_dir)
+                if folder_ok:
+                    save_dir = target_id
+                else:
+                    add_log("WARNING", f"【剧集绑定】{req.title} 无法创建 115 独立剧集目录，将只转存不绑定: {folder_msg}")
+                    cloud_path = None
+            success, msg = await push_to_115(config.get('cookie_115', ''), req.url, req.pwd, save_dir)
+        elif drive_type == '123':
+            cloud_path = None
+            save_dir = config.get('drive123_save_dir', '0').split('-')[0].strip() if config.get('drive123_save_dir') else "0"
+            success, msg = await push_to_123(
+                config.get('drive123_client_id', ''),
+                config.get('drive123_client_secret', ''),
+                req.url,
+                req.pwd,
+                save_dir,
+            )
             
         if success:
             conn = get_db(); today = datetime.date.today().isoformat()
@@ -255,6 +354,17 @@ async def api_save_link(req: SaveLinkModel):
             if existing: conn.execute("UPDATE subscriptions SET status = 'success', drive_type = ? WHERE tmdb_id = ?", (drive_type, req.tmdb_id))
             else: conn.execute("INSERT INTO subscriptions (tmdb_id, status, drive_type) VALUES (?, 'success', ?)", (req.tmdb_id, drive_type))
             conn.commit(); conn.close()
+            parent_id = save_dir if drive_type in {'quark', 'aliyun', '115', '123'} else "0"
+            await bind_series_after_transfer(
+                req.tmdb_id,
+                req.media_type,
+                req.title,
+                drive_type,
+                req.url,
+                req.pwd or "",
+                parent_id,
+                cloud_path,
+            )
             add_log("SUCCESS", f"【手动转存】{req.title} 转存成功，目标:{drive_type}")
             return {"code": 200, "message": "转存成功！"}
         add_log("ERROR", f"【手动转存】{req.title} 转存失败: {msg}")
@@ -263,9 +373,239 @@ async def api_save_link(req: SaveLinkModel):
         add_log("ERROR", f"【手动转存】异常: {str(e)}")
         return {"code": 500, "message": f"异常: {str(e)}"}
 
+
+def _infer_transfer_link_type(url: str):
+    link = (url or "").strip().lower()
+    if link.startswith("magnet:?"):
+        return "magnet", None
+    if link.startswith("ed2k://"):
+        return "ed2k", None
+    if "pan.baidu.com" in link:
+        return "share", "baidu"
+    if "pan.quark.cn" in link:
+        return "share", "quark"
+    if "alipan.com" in link or "aliyundrive.com" in link:
+        return "share", "aliyun"
+    if "123pan.com" in link or "123684.com" in link:
+        return "share", "123"
+    if "115.com/s/" in link or "115cdn.com/s/" in link:
+        return "share", "115"
+    return "unknown", None
+
+
+def _extract_transfer_link_and_pwd(raw_text: str, explicit_pwd: str = ""):
+    text = (raw_text or "").strip()
+    pwd = (explicit_pwd or "").strip()
+    url = ""
+    patterns = [
+        r"magnet:\?[^\s\"'<>，。]+",
+        r"ed2k://[^\s\"'<>，。]+",
+        r"https?://[^\s\"'<>，。]+",
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, text, re.IGNORECASE)
+        if match:
+            url = match.group(0).rstrip("，。；;,")
+            break
+    if not url and text:
+        url = text
+
+    if not pwd and url.startswith(("http://", "https://")):
+        query = urllib.parse.parse_qs(urllib.parse.urlparse(url).query)
+        for key in ("pwd", "password", "passcode", "code", "share_pwd", "sharePassword"):
+            if query.get(key):
+                pwd = str(query[key][0]).strip()
+                break
+
+    if not pwd:
+        pwd_match = re.search(
+            r"(?:提取码|访问码|密码|口令|pwd|passcode|password|code)\s*[:：=]?\s*([A-Za-z0-9]{3,8})",
+            text,
+            re.IGNORECASE,
+        )
+        if pwd_match:
+            pwd = pwd_match.group(1).strip()
+
+    return url, pwd
+
+
+def _default_save_dir(config, drive_type):
+    if drive_type == "aliyun":
+        return (config.get("aliyun_save_dir") or "root").split("-")[0].strip() or "root"
+    if drive_type == "quark":
+        return (config.get("quark_save_dir") or "0").split("-")[0].strip() or "0"
+    if drive_type == "123":
+        return (config.get("drive123_save_dir") or "0").split("-")[0].strip() or "0"
+    if drive_type == "baidu":
+        return ""
+    return (config.get("drive115_save_dir") or "0").split("-")[0].strip() or "0"
+
+
+def _set_transfer_task_status(task_id, status, message=""):
+    conn = get_db()
+    conn.execute(
+        "UPDATE transfer_download_tasks SET status=?, message=?, updated_at=CURRENT_TIMESTAMP WHERE id=?",
+        (status, message or "", task_id),
+    )
+    conn.commit()
+    conn.close()
+
+
+async def _run_transfer_download_task(task_id):
+    from scheduler import push_to_quark, push_to_aliyun, push_to_115, push_to_123
+
+    conn = get_db()
+    task = conn.execute("SELECT * FROM transfer_download_tasks WHERE id=?", (task_id,)).fetchone()
+    conn.close()
+    if not task:
+        return
+
+    config = get_sys_config()
+    drive_type = task["drive_type"]
+    link_type = task["link_type"]
+    source_url = task["source_url"]
+    pwd = task["pwd"] or ""
+    title = task["title"] or source_url[:80]
+    save_dir = task["save_dir"] or _default_save_dir(config, drive_type)
+
+    _set_transfer_task_status(task_id, "running", "任务执行中")
+    add_log("INFO", f"【转存下载】《{title}》开始执行，类型:{link_type}，目标网盘:{drive_type}，目录:{save_dir}")
+
+    try:
+        if drive_type == "baidu":
+            msg = "百度网盘分享链接已识别，但当前暂未接入百度网盘转存接口"
+            _set_transfer_task_status(task_id, "failed", msg)
+            add_log("WARNING", f"【转存下载】《{title}》{msg}")
+            return
+
+        ready, ready_msg = require_drive_ready(drive_type, config)
+        if not ready:
+            _set_transfer_task_status(task_id, "failed", ready_msg)
+            add_log("WARNING", f"【转存下载】《{title}》跳过：{ready_msg}")
+            return
+
+        if link_type in {"magnet", "ed2k"}:
+            if drive_type != "115":
+                msg = "磁力/ED2K 当前已接入 115 离线下载；该网盘暂未接入离线下载接口"
+                _set_transfer_task_status(task_id, "failed", msg)
+                add_log("WARNING", f"【转存下载】《{title}》{msg}")
+                return
+            success, msg = await Drive115(config.get("cookie_115", "")).add_offline_download(source_url, save_dir)
+        elif link_type == "share":
+            if config.get("pancheck_enabled", "1") != "0" and infer_pancheck_platform(drive_type, source_url):
+                check_result = await check_link_validity(source_url, drive_type, pwd, config)
+                add_log("INFO", f"【转存下载·检测】《{title}》{drive_type} -> {check_result.get('status')}，{check_result.get('message')}")
+                if check_result.get("valid") is False:
+                    msg = check_result.get("message") or "链接失效"
+                    _set_transfer_task_status(task_id, "failed", f"链接检测失败：{msg}")
+                    return
+            if drive_type == "quark":
+                success, msg = await push_to_quark(config.get("cookie_quark", ""), source_url, pwd, save_dir)
+            elif drive_type == "aliyun":
+                success, msg = await push_to_aliyun(config.get("token_aliyun", ""), source_url, pwd, save_dir)
+            elif drive_type == "123":
+                success, msg = await push_to_123(
+                    config.get("drive123_client_id", ""),
+                    config.get("drive123_client_secret", ""),
+                    source_url,
+                    pwd,
+                    save_dir,
+                )
+            else:
+                success, msg = await push_to_115(config.get("cookie_115", ""), source_url, pwd, save_dir)
+        else:
+            success, msg = False, "无法识别链接类型，请粘贴网盘分享链接、magnet 或 ed2k"
+
+        if success:
+            _set_transfer_task_status(task_id, "success", msg)
+            add_log("SUCCESS", f"【转存下载】《{title}》完成：{msg}")
+        else:
+            _set_transfer_task_status(task_id, "failed", msg)
+            add_log("ERROR", f"【转存下载】《{title}》失败：{msg}")
+    except Exception as exc:
+        _set_transfer_task_status(task_id, "failed", str(exc))
+        add_log("ERROR", f"【转存下载】《{title}》异常：{exc}")
+
+
+@router.get("/api/transfer_download/tasks")
+def api_transfer_download_tasks(limit: int = 100):
+    conn = get_db()
+    rows = conn.execute(
+        "SELECT * FROM transfer_download_tasks ORDER BY id DESC LIMIT ?",
+        (max(min(int(limit or 100), 500), 1),),
+    ).fetchall()
+    conn.close()
+    return [dict(row) for row in rows]
+
+
+@router.post("/api/transfer_download/tasks")
+async def api_create_transfer_download_task(req: TransferDownloadTaskModel):
+    config = get_sys_config()
+    source_url, extracted_pwd = _extract_transfer_link_and_pwd(req.url, req.pwd or "")
+    if not source_url:
+        return {"code": 400, "message": "链接不能为空"}
+
+    link_type, detected_drive = _infer_transfer_link_type(source_url)
+    if link_type == "unknown":
+        return {"code": 400, "message": "无法识别链接类型，请粘贴网盘分享链接、magnet 或 ed2k"}
+
+    if link_type == "magnet":
+        drive_type = req.drive_type or config.get("magnet_download_drive") or "115"
+    elif link_type == "ed2k":
+        drive_type = req.drive_type or config.get("ed2k_download_drive") or "115"
+    else:
+        drive_type = detected_drive or req.drive_type or "115"
+    drive_type = drive_type if drive_type in {"115", "aliyun", "quark", "123", "baidu"} else "115"
+    save_dir = _default_save_dir(config, drive_type)
+    title = (req.title or "").strip() or source_url[:80]
+
+    conn = get_db()
+    cursor = conn.cursor()
+    cursor.execute(
+        """INSERT INTO transfer_download_tasks
+           (title, source_url, pwd, link_type, drive_type, save_dir, status, message)
+           VALUES (?, ?, ?, ?, ?, ?, 'pending', '等待执行')""",
+        (title, source_url, extracted_pwd, link_type, drive_type, save_dir),
+    )
+    task_id = cursor.lastrowid
+    conn.commit()
+    conn.close()
+
+    asyncio.create_task(_run_transfer_download_task(task_id))
+    return {"code": 202, "message": "任务已添加，正在后台执行", "id": task_id}
+
+
+@router.post("/api/transfer_download/tasks/{task_id}/retry")
+async def api_retry_transfer_download_task(task_id: int):
+    conn = get_db()
+    exists = conn.execute("SELECT id FROM transfer_download_tasks WHERE id=?", (task_id,)).fetchone()
+    if exists:
+        conn.execute(
+            "UPDATE transfer_download_tasks SET status='pending', message='等待重试', updated_at=CURRENT_TIMESTAMP WHERE id=?",
+            (task_id,),
+        )
+        conn.commit()
+    conn.close()
+    if not exists:
+        return {"code": 404, "message": "任务不存在"}
+    asyncio.create_task(_run_transfer_download_task(task_id))
+    return {"code": 202, "message": "任务已重新提交"}
+
+
+@router.delete("/api/transfer_download/tasks/{task_id}")
+def api_delete_transfer_download_task(task_id: int):
+    conn = get_db()
+    conn.execute("DELETE FROM transfer_download_tasks WHERE id=?", (task_id,))
+    conn.commit()
+    conn.close()
+    return {"code": 200, "message": "任务已删除"}
+
 @router.post("/api/drive/list")
 async def api_drive_list(req: DriveListReq):
     config = get_sys_config()
+    ready, ready_msg = require_drive_ready(req.drive_type, config)
+    if not ready:
+        return {"code": 400, "data": [], "msg": ready_msg}
     result = []
     try:
         if req.drive_type == 'quark':
@@ -285,6 +625,17 @@ async def api_drive_list(req: DriveListReq):
                     "size": i.get('s', 0),
                     "updated_at": datetime.datetime.fromtimestamp(int(i.get('te') or i.get('tu') or 0)).strftime('%Y-%m-%d %H:%M:%S') if (i.get('te') or i.get('tu')) else (i.get('t') or "")
                 })
+        elif req.drive_type == '123':
+            api = Drive123Open(config.get('drive123_client_id', ''), config.get('drive123_client_secret', ''))
+            items, msg = await api.list_files(req.parent_id or "0")
+            for i in items:
+                result.append({
+                    "id": str(i.get('fileId')),
+                    "name": i.get('filename') or i.get('fileName'),
+                    "is_folder": int(i.get('type') or 0) == 1,
+                    "size": i.get('size', 0),
+                    "updated_at": i.get('updateAt') or i.get('createAt') or ""
+                })
         else:
             api = AliyunDrive(config.get('token_aliyun', ''))
             items, msg = await api.list_files(req.parent_id or "root")
@@ -298,10 +649,15 @@ async def api_drive_list(req: DriveListReq):
 @router.post("/api/drive/action")
 async def api_drive_action(req: DriveActionReq):
     config = get_sys_config()
+    ready, ready_msg = require_drive_ready(req.drive_type, config)
+    if not ready:
+        return {"code": 400, "msg": ready_msg}
     if req.drive_type == 'quark':
         api = QuarkDrive(config.get('cookie_quark', ''))
     elif req.drive_type == '115':
         api = Drive115(config.get('cookie_115', ''))
+    elif req.drive_type == '123':
+        api = Drive123Open(config.get('drive123_client_id', ''), config.get('drive123_client_secret', ''))
     else:
         api = AliyunDrive(config.get('token_aliyun', ''))
     try:
@@ -384,8 +740,8 @@ async def log_115(p: QrcodeLoginModel):
 
                 sync_alist_storages()
             except Exception as sync_error:
-                add_log("WARNING", f"115 鐧诲綍鎴愬姛锛屼絾鍚屾鍒板唴缃?AList 澶辫触: {sync_error}")
-            return {"message": "鎴愬姛"}
+                add_log("WARNING", f"115 登录成功，但同步到内置 AList 失败: {sync_error}")
+            return {"message": "成功"}
         raise HTTPException(status_code=400, detail="115 login failed or qrcode expired")
         async with httpx.AsyncClient(timeout=10.0) as client:
             res = await client.post("https://passportapi.115.com/app/1.0/web/1.0/login/qrcode/", data={"app": "web", "account": p.uid}, headers=HEADERS_115)
@@ -634,7 +990,13 @@ async def log_aliyun(p: AliyunQrcodeLoginModel):
     raise HTTPException(status_code=410, detail="已改为移动端扫码流程，确认扫码后会自动写入 Refresh Token")
 
 @router.get("/api/logs")
-def fetch_logs(): return get_logs(100)
+def fetch_logs(limit: int = 100, module: str = "all", level: str = "all"):
+    return get_logs(limit=limit, module=module, level=level)
+
+
+@router.get("/api/logs/modules")
+def fetch_log_modules():
+    return get_log_modules()
 
 @router.post("/api/tasks/trigger")
 async def trigger_task():

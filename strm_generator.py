@@ -14,15 +14,16 @@ import requests
 from database import get_db
 from logger import add_log
 from alist_integration import ALIST_BASE_URL, get_alist_admin_token
+from internal_drives import INTERNAL_DRIVE_PROVIDERS
 
-INTERNAL_SOURCE_TYPES = {'115_internal', 'aliyun_internal', 'quark_internal'}
+INTERNAL_SOURCE_TYPES = {'115_internal', 'aliyun_internal', 'quark_internal', '123_internal'}
 INTERNAL_PLAY_PUBLIC_URL = os.environ.get("CINELINK_PLAY_PUBLIC_URL", "http://127.0.0.1:8000").rstrip("/")
 INTERNAL_STRM_BACKEND = os.environ.get("CINELINK_STRM_BACKEND", "play").lower()
 ALIYUN_STRM_MODE = os.environ.get("CINELINK_ALIYUN_STRM_MODE", "preview").lower()
 QUARK_STRM_MODE = os.environ.get("CINELINK_QUARK_STRM_MODE", "preview").lower()
 INTERNAL_ALIST_PUBLIC_URL = os.environ.get("CINELINK_ALIST_PUBLIC_URL", ALIST_BASE_URL).rstrip("/")
 DEFAULT_STRM_OUTPUT_DIR = os.environ.get("CINELINK_STRM_OUTPUT_DIR", "/data/media")
-INTERNAL_SOURCE_DRIVE = {"115_internal": "115", "aliyun_internal": "aliyun", "quark_internal": "quark"}
+INTERNAL_SOURCE_DRIVE = {"115_internal": "115", "aliyun_internal": "aliyun", "quark_internal": "quark", "123_internal": "123"}
 
 strm_file_counter = 0  
 metadata_file_counter = 0  # 【新增】元数据下载计数器
@@ -64,6 +65,7 @@ def get_webdav_config(config_id):
         'config_name': row['config_name'], 'host': host, 'port': int(port),
         'username': row['username'], 'password': row['password'],
         'rootpath': row['rootpath'], 'protocol': protocol,
+        'root_id': row['root_id'] if 'root_id' in row.keys() else '',
         'public_url': "",
         'target_directory': row['target_directory'],
         'update_mode': row['update_mode'],
@@ -159,7 +161,7 @@ def get_alist_sign(path):
 def alist_api_list(path):
     token = get_alist_admin_token()
     if not token:
-        add_log("ERROR", "銆怉List STRM銆戞湭鍙栧緱 Admin Token锛屾棤娉曟壂鎻忓唴缃綉鐩樸€?")
+        add_log("ERROR", "【AList STRM】未取得 Admin Token，无法扫描内置网盘。")
         return []
 
     all_items = []
@@ -175,10 +177,10 @@ def alist_api_list(path):
             )
             data = res.json()
         except Exception as e:
-            add_log("ERROR", f"銆怉List STRM銆戣鍙栫洰褰曞紓甯? {path} -> {e}")
+            add_log("ERROR", f"【AList STRM】读取目录异常: {path} -> {e}")
             return all_items
         if data.get("code") != 200:
-            add_log("ERROR", f"銆怉List STRM銆戣鍙栫洰褰曞け璐? {path} -> {data.get('message') or data}")
+            add_log("ERROR", f"【AList STRM】读取目录失败: {path} -> {data.get('message') or data}")
             return all_items
         content = data.get("data", {}).get("content") or []
         all_items.extend(content)
@@ -234,7 +236,7 @@ def scan_alist_directories_concurrently(config, script_config, existing_records)
     root_dir = get_internal_alist_root(config)
     config["rootpath"] = root_dir
     meta_formats = script_config['subtitle_formats'] + script_config['image_formats'] + script_config['metadata_formats']
-    add_log("INFO", f"馃搨 寮€濮嬩娇鐢?AList API 鎵弿鍐呯疆缃戠洏鐩綍: {root_dir}")
+    add_log("INFO", f"📂 开始使用 AList API 扫描内置网盘目录: {root_dir}")
 
     max_workers = script_config.get('download_threads', 4) * 2
     futures = set()
@@ -254,14 +256,14 @@ def scan_alist_directories_concurrently(config, script_config, existing_records)
                 with counter_lock:
                     dir_scan_counter += 1
                     if dir_scan_counter % 20 == 0:
-                        add_log("INFO", f"馃攳 AList 鎵弿杩涘害: 宸叉繁鍏?{dir_scan_counter} 涓瓙鐩綍...")
+                        add_log("INFO", f"🔎 AList 扫描进度: 已深入 {dir_scan_counter} 个子目录...")
 
                 local_relative_path = alist_rel_dir(current_dir, root_dir)
                 local_directory = join_output_path(config['target_directory'], local_relative_path)
                 try:
                     os.makedirs(local_fs_path(local_directory), exist_ok=True)
                 except Exception as e:
-                    add_log("ERROR", f"鉂?鍒涘缓 STRM 鏈湴鐩綍澶辫触: [{local_directory}] -> {e}")
+                    add_log("ERROR", f"❌ 创建 STRM 本地目录失败: [{local_directory}] -> {e}")
                     continue
 
                 for item in result:
@@ -298,7 +300,154 @@ def scan_alist_directories_concurrently(config, script_config, existing_records)
                             pass
                         else:
                             with counter_lock:
-                                metadata_tasks.append((remote_path, local_directory, relative_path, local_file_name))
+                                    metadata_tasks.append((remote_path, local_directory, relative_path, local_file_name))
+
+
+def internal_root_is_default(drive, root_id):
+    root_id = str(root_id or "").strip()
+    if not root_id:
+        return True
+    return root_id == ("root" if drive == "aliyun" else "0")
+
+
+def internal_item_name(provider, item):
+    return provider.get_name(item, "") or item.get("name") or item.get("file_name") or item.get("filename") or ""
+
+
+def internal_item_is_folder(drive, item):
+    if drive == "quark":
+        return item.get("file_type") == 0
+    if drive == "aliyun":
+        return item.get("type") == "folder"
+    if drive == "115":
+        return bool(item.get("cid")) and not item.get("fid")
+    if drive == "123":
+        return int(item.get("type") or 0) == 1
+    return False
+
+
+def internal_item_folder_id(drive, item):
+    if drive == "quark":
+        return item.get("fid")
+    if drive == "aliyun":
+        return item.get("file_id")
+    if drive == "115":
+        return item.get("cid")
+    if drive == "123":
+        return item.get("fileId")
+    return ""
+
+
+def internal_item_play_id(drive, item):
+    if drive == "quark":
+        return item.get("fid")
+    if drive == "aliyun":
+        return item.get("file_id")
+    if drive == "115":
+        return item.get("pc") or item.get("pick_code") or item.get("pickcode")
+    if drive == "123":
+        return item.get("fileId")
+    return ""
+
+
+def make_internal_id_ref(drive, play_id, name):
+    return f"internal-id://{drive}/{quote(str(play_id), safe='')}?name={quote(str(name or ''), safe='')}"
+
+
+def parse_internal_id_ref(ref):
+    parsed = urlparse(ref)
+    return parsed.netloc, unquote(parsed.path.strip("/")), unquote(parsed.query.replace("name=", "", 1)) if parsed.query.startswith("name=") else ""
+
+
+def scan_internal_directories_by_id(config, script_config, existing_records):
+    global video_file_counter, existing_strm_file_counter, strm_tasks, metadata_tasks, dir_scan_counter
+
+    drive = INTERNAL_SOURCE_DRIVE.get(config.get("source_type"), "")
+    provider = INTERNAL_DRIVE_PROVIDERS.get(drive)
+    root_id = str(config.get("root_id") or "").strip()
+    if not provider or internal_root_is_default(drive, root_id):
+        scan_alist_directories_concurrently(config, script_config, existing_records)
+        return
+
+    config['target_directory'] = normalize_target_directory(config)
+    try:
+        os.makedirs(local_fs_path(config['target_directory']), exist_ok=True)
+    except Exception as e:
+        add_log("ERROR", f"❌ STRM 输出根目录不可用: [{config['target_directory']}] -> {e}")
+        return
+
+    meta_formats = script_config['subtitle_formats'] + script_config['image_formats'] + script_config['metadata_formats']
+    add_log("INFO", f"🎯 STRM 内置节点 [{config['config_name']}] 使用指定目录 ID 扫描: {drive}:{root_id}")
+
+    max_workers = script_config.get('download_threads', 4) * 2
+    futures = set()
+    visited = {root_id}
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        futures.add(executor.submit(provider.list_children, root_id))
+        future_dirs = {}
+        future_dirs[next(iter(futures))] = ("", root_id)
+
+        while futures:
+            done, futures = concurrent.futures.wait(futures, return_when=concurrent.futures.FIRST_COMPLETED)
+            for future in done:
+                rel_dir, current_id = future_dirs.pop(future, ("", root_id))
+                try:
+                    result = future.result() or []
+                except Exception as exc:
+                    add_log("ERROR", f"❌ STRM 指定目录扫描失败: {drive}:{current_id} -> {exc}")
+                    continue
+
+                with counter_lock:
+                    dir_scan_counter += 1
+                    if dir_scan_counter % 20 == 0:
+                        add_log("INFO", f"📁 STRM 指定目录扫描进度: 已深入 {dir_scan_counter} 个子目录...")
+
+                local_directory = join_output_path(config['target_directory'], rel_dir)
+                try:
+                    os.makedirs(local_fs_path(local_directory), exist_ok=True)
+                except Exception as e:
+                    add_log("ERROR", f"❌ 创建 STRM 本地目录失败: [{local_directory}] -> {e}")
+                    continue
+
+                for item in result:
+                    name = internal_item_name(provider, item)
+                    if not name:
+                        continue
+                    if internal_item_is_folder(drive, item):
+                        child_id = str(internal_item_folder_id(drive, item) or "")
+                        if child_id and child_id not in visited:
+                            visited.add(child_id)
+                            child_rel = posixpath.join(rel_dir, name) if rel_dir else name
+                            child_future = executor.submit(provider.list_children, child_id)
+                            futures.add(child_future)
+                            future_dirs[child_future] = (child_rel, child_id)
+                        continue
+
+                    file_extension = os.path.splitext(name)[1].lower().lstrip('.')
+                    play_id = internal_item_play_id(drive, item)
+                    if not play_id:
+                        continue
+                    remote_ref = make_internal_id_ref(drive, play_id, name)
+                    if file_extension in script_config['video_formats']:
+                        with counter_lock:
+                            video_file_counter += 1
+                        strm_file_name = os.path.splitext(name)[0] + ".strm"
+                        strm_file_path = os.path.join(local_directory, strm_file_name)
+                        relative_path = os.path.relpath(strm_file_path, config['target_directory'])
+                        if config['update_mode'] == 'incremental' and relative_path in existing_records:
+                            with counter_lock:
+                                existing_strm_file_counter += 1
+                        else:
+                            with counter_lock:
+                                strm_tasks.append((remote_ref, provider.get_size(item), local_directory, relative_path, strm_file_name))
+                    elif config['download_enabled'] == 1 and file_extension in meta_formats:
+                        local_file_path = os.path.join(local_directory, name)
+                        relative_path = os.path.relpath(local_file_path, config['target_directory'])
+                        if config['update_mode'] == 'incremental' and (relative_path in existing_records or os.path.exists(local_fs_path(local_file_path))):
+                            pass
+                        else:
+                            with counter_lock:
+                                metadata_tasks.append((remote_ref, local_directory, relative_path, name))
 
 def connect_webdav(config):
     username = config['username'] or None
@@ -440,9 +589,14 @@ def create_strm_file(file_name, file_size, config, local_directory, relative_pat
     min_sec, max_sec = config['interval']
     time.sleep(random.uniform(min_sec, max_sec))
 
-    if config.get('source_type') in INTERNAL_SOURCE_TYPES:
+    if str(file_name).startswith("internal-id://"):
+        drive_name, play_id, display_name = parse_internal_id_ref(file_name)
+        http_link = f"{INTERNAL_PLAY_PUBLIC_URL}/play_id/{drive_name}/{quote(play_id, safe='')}"
+        if display_name:
+            http_link += f"?name={quote(display_name, safe='')}"
+    elif config.get('source_type') in INTERNAL_SOURCE_TYPES:
         clean_parts = [quote(part) for part in unquote(file_name).split('/') if part]
-        drive_name = clean_parts[0] if clean_parts and clean_parts[0] in {"115", "aliyun", "quark"} else INTERNAL_SOURCE_DRIVE.get(config.get('source_type'), "")
+        drive_name = clean_parts[0] if clean_parts and clean_parts[0] in {"115", "aliyun", "quark", "123"} else INTERNAL_SOURCE_DRIVE.get(config.get('source_type'), "")
         rel_parts = clean_parts[1:] if clean_parts and clean_parts[0] == drive_name else clean_parts
         if INTERNAL_STRM_BACKEND == "alist":
             decoded_path = "/" + "/".join([unquote(part) for part in ([drive_name] + rel_parts) if part])
@@ -491,7 +645,18 @@ def download_metadata_file(remote_file_name, config, local_directory, relative_p
     time.sleep(random.uniform(min_sec, max_sec))
 
     try:
-        if config.get('source_type') in INTERNAL_SOURCE_TYPES:
+        if str(remote_file_name).startswith("internal-id://"):
+            drive_name, play_id, display_name = parse_internal_id_ref(remote_file_name)
+            http_link = f"{INTERNAL_PLAY_PUBLIC_URL}/play_id/{drive_name}/{quote(play_id, safe='')}"
+            if display_name:
+                http_link += f"?name={quote(display_name, safe='')}"
+            with requests.get(http_link, stream=True, timeout=120) as res:
+                res.raise_for_status()
+                with open(local_fs_path(local_file_path), "wb") as fh:
+                    for chunk in res.iter_content(chunk_size=1024 * 1024):
+                        if chunk:
+                            fh.write(chunk)
+        elif config.get('source_type') in INTERNAL_SOURCE_TYPES:
             decoded_path = "/" + "/".join([part for part in unquote(remote_file_name).split("/") if part])
             sign = get_alist_sign(decoded_path)
             if not sign:
@@ -543,11 +708,11 @@ def main(config_id):
     try:
         os.makedirs(local_fs_path(config['target_directory']), exist_ok=True)
     except Exception as e:
-        add_log("ERROR", f"鉂?STRM 杈撳嚭鏍圭洰褰曚笉鍙敤: [{config['target_directory']}] -> {e}")
+        add_log("ERROR", f"❌ STRM 输出根目录不可用: [{config['target_directory']}] -> {e}")
         return
 
     if config.get('source_type') in INTERNAL_SOURCE_TYPES:
-        scan_alist_directories_concurrently(config, script_config, existing_records)
+        scan_internal_directories_by_id(config, script_config, existing_records)
     else:
         scan_directories_concurrently(config, script_config, existing_records)
     

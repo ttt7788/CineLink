@@ -4,7 +4,10 @@ import datetime
 import random
 import re
 from database import get_db, get_sys_config
+from config_guard import require_drive_ready
+from drive_api import Drive115
 from logger import add_log
+from series_bindings import bind_series_after_transfer, ensure_series_target_folder, refresh_series_bindings
 
 QUALITY_MAP = {"4k": 100, "2160p": 100, "uhd": 100, "1080p": 80, "fhd": 80, "bdrip": 75, "720p": 60, "remux": 95}
 
@@ -23,6 +26,7 @@ _tmdb_sync_locks = {
     "movie": asyncio.Lock(),
     "tv": asyncio.Lock(),
 }
+_auto_subscription_running = False
 
 def get_quality_score(text: str) -> int:
     text = text.lower()
@@ -122,20 +126,20 @@ async def check_115_existing_quality(cookie: str, title: str):
         except Exception: pass
     return None, 0
 
-async def push_to_cms(cms_url: str, cms_token: str, link: str):
-    api_endpoint = f"{cms_url.rstrip('/')}/api/cloud/add_share_down_by_token"
-    payload = {"url": link, "token": cms_token}
-    async with httpx.AsyncClient(timeout=20.0) as client:
-        try:
-            res = await client.post(api_endpoint, json=payload)
-            res_json = res.json()
-            if res_json.get("code") == 200: return True, res_json.get("msg")
-            return False, res_json.get("msg", "未知错误")
-        except Exception as e: return False, f"连接 CMS 失败: {str(e)}"
+async def push_to_115(cookie: str, share_url: str, passcode: str = "", save_dir: str = "0"):
+    if not cookie:
+        return False, "未配置 115 Cookie"
+    if not (save_dir or "").strip():
+        return False, "未配置 115 默认保存目录 ID"
+    try:
+        return await Drive115(cookie).save_share(share_url, passcode, save_dir)
+    except Exception as e:
+        return False, f"115 API 异常: {str(e)}"
 
 # ==================== 夸克网盘模块 ====================
 async def push_to_quark(cookie: str, share_url: str, passcode: str = "", save_dir: str = "0"):
     if not cookie: return False, "未配置夸克Cookie"
+    if not (save_dir or "").strip(): return False, "未配置夸克默认保存目录 ID"
     match = re.search(r'/s/([a-zA-Z0-9]+)', share_url)
     if not match: return False, "无法解析夸克分享链接"
     pwd_id = match.group(1)
@@ -191,6 +195,7 @@ async def push_to_quark(cookie: str, share_url: str, passcode: str = "", save_di
 # ==================== 阿里云盘模块 ====================
 async def push_to_aliyun(refresh_token: str, share_url: str, passcode: str = "", save_dir: str = "root"):
     if not refresh_token: return False, "未配置阿里云盘 Refresh Token"
+    if not (save_dir or "").strip(): return False, "未配置阿里云盘默认保存目录 ID"
     match = re.search(r'/s/([a-zA-Z0-9]+)', share_url)
     if not match: return False, "无法解析阿里云盘分享链接"
     clean_save_dir = save_dir.split('-')[0].strip() if save_dir else "root"
@@ -201,6 +206,10 @@ async def push_to_aliyun(refresh_token: str, share_url: str, passcode: str = "",
         return await api.save_share(share_url, passcode, clean_save_dir)
     except Exception as e:
         return False, f"阿里云盘 API 异常: {str(e)}"
+
+
+async def push_to_123(client_id: str, client_secret: str, share_url: str, passcode: str = "", save_dir: str = "0"):
+    return False, "123云盘 Open API 暂未提供分享链接转存能力，当前已支持文件管理、播放代理与 STRM。"
 
 # ==================== TMDB 数据采集 ====================
 # mode 支持：trending / movie / tv / base / all
@@ -355,6 +364,18 @@ async def sync_tmdb_data(force=False, mode="all"):
 
 # ==================== 调度主循环 ====================
 async def auto_subscription_task():
+    global _auto_subscription_running
+    if _auto_subscription_running:
+        add_log("WARNING", "【定时任务】已有搜刮任务正在运行，本次触发已跳过，避免重复转存。")
+        return
+    _auto_subscription_running = True
+    try:
+        await _auto_subscription_task_impl()
+    finally:
+        _auto_subscription_running = False
+
+
+async def _auto_subscription_task_impl():
     config = get_sys_config()
     api_key = config.get('api_key', '').strip()
     auto_subscribe = str(config.get('auto_subscribe_new', '0'))
@@ -366,71 +387,151 @@ async def auto_subscription_task():
     
     add_log("INFO", "【定时任务】开始处理待搜刮的订阅任务...")
     pansou_domain = config.get('pansou_domain', "http://192.168.68.200:8080")
-    cms_url = config.get('cms_api_url')
-    cms_token = config.get('cms_api_token')
-    
     cookie_115 = config.get('cookie_115')
     cookie_quark = config.get('cookie_quark')
     token_aliyun = config.get('token_aliyun')
+    drive123_client_id = config.get('drive123_client_id')
+    drive123_client_secret = config.get('drive123_client_secret')
     
+    drive115_save_dir = config.get('drive115_save_dir', '0')
     quark_save_dir = config.get('quark_save_dir', '0')
     aliyun_save_dir = config.get('aliyun_save_dir', 'root')
+    drive123_save_dir = config.get('drive123_save_dir', '0')
 
     conn = get_db()
-    subs = conn.execute("SELECT s.tmdb_id, s.drive_type, m.title FROM subscriptions s JOIN media_items m ON s.tmdb_id = m.tmdb_id WHERE s.status = 'pending'").fetchall()
+    subs = conn.execute(
+        """
+        SELECT s.tmdb_id, s.drive_type, m.title, m.media_type
+        FROM subscriptions s
+        JOIN media_items m ON s.tmdb_id = m.tmdb_id
+        WHERE s.status = 'pending'
+        """
+    ).fetchall()
     conn.close()
-    if not subs: return
+    if not subs:
+        await refresh_series_bindings()
+        return
 
     async with httpx.AsyncClient(timeout=30.0) as client:
         for sub in subs:
-            tmdb_id, title, drive_type = sub['tmdb_id'], sub['title'], sub['drive_type']
+            tmdb_id, title, media_type, drive_type = sub['tmdb_id'], sub['title'], sub['media_type'], sub['drive_type']
             add_log("INFO", f"【搜刮】执行中: 《{title}》 目标网盘: {drive_type}")
             try:
+                ready, ready_msg = require_drive_ready(drive_type, config)
+                if not ready:
+                    add_log("WARNING", f"【搜刮】《{title}》跳过：{ready_msg}")
+                    await asyncio.sleep(1)
+                    continue
                 ps_res = await client.post(f"{pansou_domain.rstrip('/')}/api/search", json={"kw": title})
                 data = ps_res.json().get("data", {}).get("merged_by_type", {})
                 
                 if drive_type == 'quark': priorities = ["quark"]
                 elif drive_type == 'aliyun': priorities = ["aliyun"]
-                else: priorities = ["115", "aliyun", "ed2k", "magnet"]
+                elif drive_type == '115': priorities = ["115"]
+                elif drive_type == '123': priorities = ["123"]
+                else: priorities = [drive_type]
                     
-                best_link, hit_type, new_note, best_pwd = None, None, "", ""
+                candidates = []
                 for p_type in priorities:
-                    if data.get(p_type) and len(data[p_type]) > 0:
-                        item = data[p_type][0]
-                        best_link = item["url"]
-                        hit_type = p_type
-                        new_note = item.get("note", "")
-                        best_pwd = item.get("password", "") or item.get("pwd", "")
-                        break
+                    for item in data.get(p_type) or []:
+                        link = item.get("url")
+                        if not link:
+                            continue
+                        candidates.append({
+                            "url": link,
+                            "hit_type": p_type,
+                            "note": item.get("note", ""),
+                            "pwd": item.get("password", "") or item.get("pwd", ""),
+                        })
                 
-                if best_link:
+                if candidates:
+                    add_log("INFO", f"【搜刮】《{title}》找到 {len(candidates)} 条 {drive_type} 候选资源，开始逐条尝试。")
                     success, msg = False, ""
-                    
-                    if drive_type == 'quark':
-                        add_log("INFO", f"【推送】命中夸克资源(密码:{best_pwd or '无'})，转存至目录[{quark_save_dir.split('-')[0].strip()}]...")
-                        success, msg = await push_to_quark(cookie_quark, best_link, best_pwd, quark_save_dir)
-                    elif drive_type == 'aliyun':
-                        add_log("INFO", f"【推送】命中阿里云盘资源(密码:{best_pwd or '无'})，转存至目录[{aliyun_save_dir.split('-')[0].strip()}]...")
-                        success, msg = await push_to_aliyun(token_aliyun, best_link, best_pwd, aliyun_save_dir)
-                    else:
-                        if not cms_url or not cms_token:
-                            add_log("WARN", "未配置 CMS，跳过 115 节点")
-                            continue
-                        ex_file, ex_score = await check_115_existing_quality(cookie_115, title)
-                        new_score = get_quality_score(new_note or title)
-                        if ex_file and ex_score >= new_score:
-                            add_log("INFO", f"【跳过】网盘已有极佳版本: {ex_file}")
-                            conn = get_db(); conn.execute("UPDATE subscriptions SET status='success' WHERE tmdb_id=?", (tmdb_id,)); conn.commit(); conn.close()
-                            continue
-                        success, msg = await push_to_cms(cms_url, cms_token, best_link)
+                    best_link, hit_type, best_pwd = "", "", ""
+                    target_save_dir = ""
+                    target_cloud_path = ""
+                    if media_type == "tv" and drive_type in {"quark", "aliyun", "115", "123"}:
+                        if drive_type == "quark":
+                            base_dir = quark_save_dir
+                        elif drive_type == "aliyun":
+                            base_dir = aliyun_save_dir
+                        elif drive_type == "123":
+                            base_dir = drive123_save_dir
+                        else:
+                            base_dir = drive115_save_dir
+                        target_save_dir, target_cloud_path, folder_ok, folder_msg = await ensure_series_target_folder(drive_type, title, base_dir.split("-")[0].strip() if base_dir else None)
+                        if folder_ok:
+                            add_log("INFO", f"【剧集绑定】《{title}》使用独立剧集目录: {target_cloud_path}")
+                        else:
+                            add_log("WARNING", f"【剧集绑定】《{title}》无法创建独立剧集目录，将只转存不绑定: {folder_msg}")
+                            target_save_dir = ""
+                            target_cloud_path = ""
+
+                    for index, candidate in enumerate(candidates, start=1):
+                        link = candidate["url"]
+                        hit_type = candidate["hit_type"]
+                        best_pwd = candidate["pwd"]
+                        note = candidate["note"]
+                        add_log("INFO", f"【推送】《{title}》尝试第 {index}/{len(candidates)} 条 {hit_type} 资源(密码:{best_pwd or '无'})...")
+
+                        if drive_type == 'quark':
+                            save_target = target_save_dir or quark_save_dir
+                            add_log("INFO", f"【推送】转存至夸克目录[{save_target.split('-')[0].strip()}]...")
+                            success, msg = await push_to_quark(cookie_quark, link, best_pwd, save_target)
+                        elif drive_type == 'aliyun':
+                            save_target = target_save_dir or aliyun_save_dir
+                            add_log("INFO", f"【推送】转存至阿里云盘目录[{save_target.split('-')[0].strip()}]...")
+                            success, msg = await push_to_aliyun(token_aliyun, link, best_pwd, save_target)
+                        elif drive_type == '115':
+                            ex_file, ex_score = await check_115_existing_quality(cookie_115, title)
+                            new_score = get_quality_score(note or title)
+                            if ex_file and ex_score >= new_score:
+                                add_log("INFO", f"【跳过】网盘已有极佳版本: {ex_file}")
+                                conn = get_db(); conn.execute("UPDATE subscriptions SET status='success' WHERE tmdb_id=?", (tmdb_id,)); conn.commit(); conn.close()
+                                success = True
+                                msg = "网盘已有极佳版本"
+                                best_link = link
+                                break
+                            save_target = target_save_dir or drive115_save_dir
+                            add_log("INFO", f"【推送】转存至 115 目录[{save_target.split('-')[0].strip()}]...")
+                            success, msg = await push_to_115(cookie_115, link, best_pwd, save_target)
+                        elif drive_type == '123':
+                            save_target = target_save_dir or drive123_save_dir
+                            add_log("INFO", f"【推送】转存至 123云盘目录[{save_target.split('-')[0].strip()}]...")
+                            success, msg = await push_to_123(drive123_client_id, drive123_client_secret, link, best_pwd, save_target)
+
+                        if success:
+                            best_link = link
+                            add_log("SUCCESS", f"【成功】《{title}》第 {index}/{len(candidates)} 条资源已入库 ({hit_type})")
+                            break
+                        add_log("WARNING", f"【重试】《{title}》第 {index}/{len(candidates)} 条资源失败: {msg}")
 
                     if success:
-                        add_log("SUCCESS", f"【成功】《{title}》已入库 ({hit_type})")
                         conn = get_db(); conn.execute("UPDATE subscriptions SET status='success' WHERE tmdb_id=?", (tmdb_id,)); conn.commit(); conn.close()
+                        parent_id = "0"
+                        if drive_type == "quark":
+                            parent_id = target_save_dir or (quark_save_dir.split("-")[0].strip() if quark_save_dir else "0")
+                        elif drive_type == "aliyun":
+                            parent_id = target_save_dir or (aliyun_save_dir.split("-")[0].strip() if aliyun_save_dir else "root")
+                        elif drive_type == "115":
+                            parent_id = target_save_dir or (drive115_save_dir.split("-")[0].strip() if drive115_save_dir else "0")
+                        elif drive_type == "123":
+                            parent_id = target_save_dir or (drive123_save_dir.split("-")[0].strip() if drive123_save_dir else "0")
+                        await bind_series_after_transfer(
+                            tmdb_id,
+                            media_type,
+                            title,
+                            drive_type,
+                            best_link,
+                            best_pwd,
+                            parent_id,
+                            target_cloud_path or None,
+                        )
                     else:
-                        add_log("ERROR", f"【失败】{msg}")
+                        add_log("ERROR", f"【失败】《{title}》{len(candidates)} 条候选资源全部尝试失败，最后错误: {msg}")
                 else:
                     add_log("WARN", f"【搜刮】全网未找到符合 {drive_type} 的《{title}》资源。")
             except Exception as e: 
                 add_log("ERROR", f"【异常】: {str(e)}")
             await asyncio.sleep(2)
+    await refresh_series_bindings()

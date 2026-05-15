@@ -1,22 +1,52 @@
 import os
 import subprocess
 import sys
-from fastapi import APIRouter, BackgroundTasks
-from database import get_db
+from fastapi import APIRouter, BackgroundTasks, HTTPException
+from config_guard import require_drive_ready
+from database import get_db, get_sys_config
 from models import StrmConfigModel, StrmSettingsModel, ReplaceDomainModel, StrmTaskModel
 from logger import add_log
 
 # 就是这一行缺失或未保存导致了报错
 strm_router = APIRouter()
 
-INTERNAL_ROOTS = {"115_internal": "/115", "aliyun_internal": "/aliyun", "quark_internal": "/quark"}
+INTERNAL_ROOTS = {"115_internal": "/115", "aliyun_internal": "/aliyun", "quark_internal": "/quark", "123_internal": "/123"}
+INTERNAL_DRIVES = {"115_internal": "115", "aliyun_internal": "aliyun", "quark_internal": "quark", "123_internal": "123"}
+INTERNAL_SAVE_DIR_KEYS = {"115": "drive115_save_dir", "aliyun": "aliyun_save_dir", "quark": "quark_save_dir", "123": "drive123_save_dir"}
+
+
+def clean_config_dir_id(value, fallback=""):
+    value = str(value or "").strip()
+    if not value:
+        return fallback
+    return value.split("-")[0].strip() or fallback
+
+
+def normalize_internal_rootpath(source_type, rootpath):
+    base = INTERNAL_ROOTS[source_type]
+    raw = str(rootpath or "").replace("\\", "/").strip()
+    if not raw or raw == "/":
+        return base
+    raw = raw.replace("/dav", "", 1) if raw.startswith("/dav") else raw
+    if not raw.startswith("/"):
+        raw = "/" + raw
+    if raw == base or raw.startswith(base.rstrip("/") + "/"):
+        return raw.rstrip("/")
+    return (base.rstrip("/") + "/" + raw.strip("/")).rstrip("/")
 
 
 def normalize_strm_config(config: StrmConfigModel):
     source_type = config.source_type or "webdav"
     if source_type in INTERNAL_ROOTS:
-        return source_type, "internal://alist", "", "", INTERNAL_ROOTS[source_type]
-    return source_type, config.url, config.username, config.password, config.rootpath
+        drive_type = INTERNAL_DRIVES[source_type]
+        ready, ready_msg = require_drive_ready(drive_type)
+        if not ready:
+            raise HTTPException(status_code=400, detail=ready_msg)
+        cfg = get_sys_config()
+        fallback_id = clean_config_dir_id(cfg.get(INTERNAL_SAVE_DIR_KEYS[drive_type]), "root" if drive_type == "aliyun" else "0")
+        root_id = clean_config_dir_id(config.root_id, fallback_id)
+        return source_type, "internal://alist", "", "", normalize_internal_rootpath(source_type, config.rootpath), root_id
+    return source_type, config.url, config.username, config.password, config.rootpath, ""
 
 @strm_router.get("/api/strm/configs")
 def get_strm_configs():
@@ -28,11 +58,11 @@ def get_strm_configs():
 @strm_router.post("/api/strm/configs")
 def add_strm_config(config: StrmConfigModel):
     conn = get_db()
-    source_type, url, username, password, rootpath = normalize_strm_config(config)
+    source_type, url, username, password, rootpath, root_id = normalize_strm_config(config)
     conn.execute('''INSERT INTO strm_configs
-        (source_type, config_name, url, username, password, rootpath, target_directory, download_enabled, update_mode, download_interval_range)
-        VALUES (?,?,?,?,?,?,?,?,?,?)''',
-        (source_type, config.config_name, url, username, password, rootpath,
+        (source_type, config_name, url, username, password, rootpath, root_id, target_directory, download_enabled, update_mode, download_interval_range)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?)''',
+        (source_type, config.config_name, url, username, password, rootpath, root_id,
          config.target_directory, config.download_enabled, config.update_mode, config.download_interval_range))
     conn.commit(); conn.close()
     add_log("INFO", f"🔗 新增 STRM 节点: [{config.config_name}] ({source_type})")
@@ -41,11 +71,11 @@ def add_strm_config(config: StrmConfigModel):
 @strm_router.put("/api/strm/configs/{config_id}")
 def update_strm_config(config_id: int, config: StrmConfigModel):
     conn = get_db()
-    source_type, url, username, password, rootpath = normalize_strm_config(config)
+    source_type, url, username, password, rootpath, root_id = normalize_strm_config(config)
     conn.execute('''UPDATE strm_configs SET
-        source_type=?, config_name=?, url=?, username=?, password=?, rootpath=?, target_directory=?,
+        source_type=?, config_name=?, url=?, username=?, password=?, rootpath=?, root_id=?, target_directory=?,
         download_enabled=?, update_mode=?, download_interval_range=? WHERE id=?''',
-        (source_type, config.config_name, url, username, password, rootpath,
+        (source_type, config.config_name, url, username, password, rootpath, root_id,
          config.target_directory, config.download_enabled, config.update_mode, config.download_interval_range, config_id))
     conn.commit(); conn.close()
     add_log("INFO", f"📝 修改 STRM 节点: [{config.config_name}] (ID: {config_id}, 来源: {source_type})")
@@ -80,6 +110,14 @@ def update_strm_settings(settings: StrmSettingsModel):
 
 @strm_router.post("/api/strm/run/{config_id}")
 def run_strm_generator(config_id: int, background_tasks: BackgroundTasks):
+    conn = get_db()
+    row = conn.execute("SELECT source_type, config_name FROM strm_configs WHERE id=?", (config_id,)).fetchone()
+    conn.close()
+    if row and row["source_type"] in INTERNAL_DRIVES:
+        ready, ready_msg = require_drive_ready(INTERNAL_DRIVES[row["source_type"]])
+        if not ready:
+            add_log("WARNING", f"【STRM】节点 [{row['config_name']}] 未启动：{ready_msg}")
+            raise HTTPException(status_code=400, detail=ready_msg)
     script_path = os.path.join(os.path.dirname(__file__), 'strm_generator.py')
     def run_script():
         add_log("INFO", f"🚀 正在拉起 STRM 矩阵生成作业 (关联节点ID: {config_id})...")
