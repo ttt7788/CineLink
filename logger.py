@@ -19,6 +19,7 @@ LOG_MODULES = {
     "plugin": "插件",
     "auth": "授权登录",
     "link_check": "链接检测",
+    "pansou": "盘搜搜索",
 }
 
 
@@ -36,6 +37,7 @@ _MODULE_RULES = [
     ("plugin", ("插件", "回收站")),
     ("auth", ("二维码", "扫码", "登录", "Refresh Token", "Cookie")),
     ("link_check", ("链接检测", "PanCheck")),
+    ("pansou", ("盘搜",)),
 ]
 
 

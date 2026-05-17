@@ -16,6 +16,7 @@ from logger import get_logs, get_log_modules, add_log
 from drive_api import Drive115, QuarkDrive, Drive123Open
 from aliyun_drive_mobile import AliyunDrive
 from pancheck_client import check_link_validity, infer_pancheck_platform
+from pansou_client import search_pansou
 from series_bindings import bind_series_after_transfer, ensure_series_target_folder, rebuild_success_series_bindings
 
 router = APIRouter()
@@ -243,13 +244,23 @@ async def rebuild_series_bindings_api():
 @router.get("/api/pansou_search")
 async def search_ps(kw: str):
     c = get_sys_config()
-    domain = c.get('pansou_domain', 'http://192.168.68.200:8080').rstrip('/')
-    try:
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            res = await client.post(f"{domain}/api/search", json={"kw": kw})
-            d = res.json()
-            return d.get("data") if d.get("code") == 0 else d
-    except Exception as e: return {"error": f"无法连接: {str(e)}", "merged_by_type": {}}
+    result = await search_pansou(kw, c)
+    level = "INFO" if result.get("ok") and result.get("total", 0) else "WARNING"
+    add_log(
+        level,
+        f"【盘搜】关键词《{kw}》，来源:{result.get('source') or '未配置'}，结果:{result.get('total', 0)}，状态:{result.get('message')}",
+    )
+    return {
+        "code": 0 if result.get("ok") else 502,
+        "message": result.get("message") or "",
+        "source": result.get("source") or "",
+        "total": result.get("total", 0),
+        "merged_by_type": result.get("merged_by_type", {}),
+        "data": {
+            "total": result.get("total", 0),
+            "merged_by_type": result.get("merged_by_type", {}),
+        },
+    }
 
 @router.post("/api/link/check")
 async def api_check_link(req: LinkCheckModel):

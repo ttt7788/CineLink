@@ -9,7 +9,7 @@ const app = createApp({
         const lm = ref([]), sr = ref([]), sq = ref(''), discoverHot = ref([]), discoverSearched = ref(false);
         const subscriptions = ref([]), records = ref([]), systemLogs = ref([]);
         const transferRecordPage = ref(1), transferRecordPageSize = 10, recordGroupPages = ref({}), bindingRefreshing = ref(false);
-        const currentPage = ref(1), pageSize = ref(18), totalItems = ref(0);
+        const currentPage = ref(1), pageSize = ref(12), totalItems = ref(0);
         
         const selectedMediaList = ref([]);
         const selectedTableRows = ref([]);
@@ -22,6 +22,8 @@ const app = createApp({
         const config = ref({ api_domain: '', image_domain: '', api_key: '', pansou_domain: '', pancheck_domain: '', pancheck_enabled: '1', cookie_115: '', cookie_quark: '', token_aliyun: '', drive115_save_dir: '0', quark_save_dir: '0', aliyun_save_dir: 'root', drive123_client_id: '', drive123_client_secret: '', drive123_save_dir: '0', cron_expression: '', auto_subscribe_new: '0', auto_subscribe_drive: '115', magnet_download_drive: '115', ed2k_download_drive: '115' });
 
         const pv = ref(false), pr = ref({}), curKw = ref('');
+        const panSearchError = ref('');
+        const panSearchSource = ref('');
         const curMedia = ref(null), savingLink = ref(false);
         const qrLoading = ref(false), qUrl = ref(''), qSt = ref(''), qTok = ref(null), pTimer = ref(null);
         const aliyunQrLoading = ref(false), aliyunQrUrl = ref(''), aliyunQrStatus = ref(''), aliyunQrToken = ref(null), aliyunQrTimer = ref(null);
@@ -189,7 +191,7 @@ const app = createApp({
             return `${items.length} 条成功记录，剧集已绑定 ${bound} / 未绑定 ${Math.max(tvItems.length - bound, 0)}`;
         };
         const panSearchStats = computed(() => {
-            const groups = Object.values(pr.value || {});
+            const groups = Object.values(pr.value || {}).filter(Array.isArray);
             const rows = groups.flatMap(items => items || []);
             return {
                 total: rows.length,
@@ -499,7 +501,33 @@ const app = createApp({
         const deleteRecord = async (r) => { try { await ElMessageBox.confirm(`清除此记录？`, '确认', { type: 'danger' }); await axios.delete(`${API_BASE}/subscriptions/${r.tmdb_id}`); loadRecords(); } catch (e) {} };
         const batchDeleteRecords = async () => { if (!selectedTableRows.value.length) return; try { await ElMessageBox.confirm(`删除选中记录？`, '确认', { type: 'danger' }); await axios.post(`${API_BASE}/subscriptions/batch_delete`, { tmdb_ids: selectedTableRows.value.map(r => r.tmdb_id) }); ElMessage.success('清理成功'); selectedTableRows.value = []; if (activeMenu.value === 'subscriptions') loadSubscriptions(); else if (activeMenu.value === 'records') loadRecords(); } catch (e) {} };
 
-        const openPanSou = async (i) => { if (!i) return; curMedia.value = i; const t = i.title || i.name; curKw.value = t; pr.value = {}; pv.value = true; ElMessage.info(`正在拉取...`); try { const r = await axios.get(`${API_BASE}/pansou_search`, { params: { kw: t } }); let d = r.data; if (d && d.data && d.data.merged_by_type) d = d.data; pr.value = d.merged_by_type || d || {}; } catch(e){} };
+        const openPanSou = async (i) => {
+            if (!i) return;
+            curMedia.value = i;
+            const t = i.title || i.name;
+            curKw.value = t;
+            pr.value = {};
+            panSearchError.value = '';
+            panSearchSource.value = '';
+            pv.value = true;
+            ElMessage.info('正在拉取盘搜结果...');
+            try {
+                const r = await axios.get(`${API_BASE}/pansou_search`, { params: { kw: t } });
+                const body = r.data || {};
+                const data = body.data && body.data.merged_by_type ? body.data : body;
+                const merged = data.merged_by_type || {};
+                pr.value = Object.fromEntries(Object.entries(merged).filter(([, rows]) => Array.isArray(rows) && rows.length));
+                panSearchSource.value = body.source || data.source || '';
+                if (!Object.keys(pr.value).length) {
+                    panSearchError.value = body.message || data.message || '没有搜索到可用网盘资源';
+                    ElMessage.warning(panSearchError.value);
+                }
+            } catch (e) {
+                panSearchError.value = e.response?.data?.message || e.response?.data?.detail || e.message || '盘搜请求失败';
+                pr.value = {};
+                ElMessage.error(panSearchError.value);
+            }
+        };
         const inferDriveType = (rawType, url) => {
             const rt = String(rawType || '').toLowerCase();
             const link = String(url || '').toLowerCase();
@@ -802,7 +830,7 @@ const app = createApp({
         });
 
         return { 
-            activeMenu, syncingData, loading, lm, sr, sq, discoverHot, discoverSearched, discoverQuickKeywords, discoverHotStats, mediaPageMeta, mediaLibraryStats, subscriptions, subscriptionGroups, subscriptionTotal, records, recordGroups, pagedRecordGroups, transferRecordPage, transferRecordPageSize, recordGroupPages, getRecordGroupPage, setRecordGroupPage, recordPageRangeText, bindingRefreshing, transferRecordTotal, recordStats, panSearchStats, systemLogs, config, pv, pr, qrLoading, qUrl, qSt, aliyunQrLoading, aliyunQrUrl, aliyunQrStatus, curKw, currentPage, pageSize, totalItems,
+            activeMenu, syncingData, loading, lm, sr, sq, discoverHot, discoverSearched, discoverQuickKeywords, discoverHotStats, mediaPageMeta, mediaLibraryStats, subscriptions, subscriptionGroups, subscriptionTotal, records, recordGroups, pagedRecordGroups, transferRecordPage, transferRecordPageSize, recordGroupPages, getRecordGroupPage, setRecordGroupPage, recordPageRangeText, bindingRefreshing, transferRecordTotal, recordStats, panSearchStats, panSearchError, panSearchSource, systemLogs, config, pv, pr, qrLoading, qUrl, qSt, aliyunQrLoading, aliyunQrUrl, aliyunQrStatus, curKw, currentPage, pageSize, totalItems,
             selectedMediaList, selectedTableRows, isMediaSelected, toggleMediaSelect, batchSubscribe, handleSelectionChange, batchDeleteRecords,
             driveFiles, driveLoading, drivePaths, currentDriveType, currentDriveStatus, driveConfigCards, pluginDriveOptions, getDriveConfigStatus, requireDriveReady, formatFileSize, clickDriveBreadcrumb, openDriveFolder, promptMkdir, promptRename, deleteDriveFile,
             recycleConfig, recycleItems, recycleLoading, loadRecycleConfig, saveRecycleConfig, loadRecycleItems, emptyRecyclebin, getRecycleItems,

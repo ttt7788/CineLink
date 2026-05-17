@@ -10,7 +10,7 @@
     <script src="/static/lib/index.full.min.js"></script>
     <script src="/static/lib/axios.min.js"></script>
     <script src="/static/lib/index.iife.min.js"></script>
-    <link rel="stylesheet" href="/static/style.css?v=2.0.33" />
+    <link rel="stylesheet" href="/static/style.css?v=2.0.37" />
     <style> 
         .el-dropdown { vertical-align: middle; margin-right: 5px; } 
         .form-tip { font-size: 12px; color: #888; margin-top: 5px; line-height: 1.4; }
@@ -24,7 +24,7 @@
 </head>
 <body>
     <div id="app">
-        <el-container style="height: 100vh;">
+        <el-container class="app-shell">
             <el-header class="app-header">
                 <div class="brand-lockup">
                     <el-icon><video-camera-filled></video-camera-filled></el-icon>
@@ -43,7 +43,7 @@
                     <el-button type="warning" @click="runTaskManual" class="header-action"><el-icon><Promotion></Promotion></el-icon>立即搜刮</el-button>
                 </div>
             </el-header>
-            <el-container>
+            <el-container class="app-body">
                 <el-aside width="236px">
                     <el-menu class="side-menu" background-color="#263445" text-color="#c3ccd9" active-text-color="#ffffff" :default-active="activeMenu" @select="handleMenuSelect">
                         
@@ -288,6 +288,7 @@
                                 <p>{{ mediaPageMeta.desc }}</p>
                             </div>
                             <div class="media-toolbar-actions">
+                                <el-tag type="primary" effect="plain">每页 {{ pageSize }}</el-tag>
                                 <el-tag type="info" effect="plain">本页 {{ mediaLibraryStats.current }}</el-tag>
                                 <el-tag type="success" effect="plain">已入库 {{ mediaLibraryStats.transferred }}</el-tag>
                             </div>
@@ -986,6 +987,7 @@
                     <div>
                         <div class="pan-dialog-kicker">全网盘搜索结果</div>
                         <h2>{{ curKw }}</h2>
+                        <p v-if="panSearchSource" class="pan-dialog-source">来源：{{ panSearchSource }}</p>
                     </div>
                     <div class="pan-dialog-stats">
                         <span><strong>{{ panSearchStats.total }}</strong>资源</span>
@@ -1036,11 +1038,11 @@
                     </el-table>
                 </el-tab-pane>
             </el-tabs>
-            <el-empty v-else description="暂未搜索到任何网盘资源"></el-empty>
+            <el-empty v-else :description="panSearchError || '暂未搜索到任何网盘资源'"></el-empty>
         </el-dialog>
     </div>
     
     <script src="/static/useStrm.js?v=2.0.17"></script>
-    <script src="/static/app.js?v=2.0.33"></script>
+    <script src="/static/app.js?v=2.0.35"></script>
 </body>
 </html>

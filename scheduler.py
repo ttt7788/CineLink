@@ -7,6 +7,7 @@ from database import get_db, get_sys_config
 from config_guard import require_drive_ready
 from drive_api import Drive115
 from logger import add_log
+from pansou_client import search_pansou
 from series_bindings import bind_series_after_transfer, ensure_series_target_folder, refresh_series_bindings
 
 QUALITY_MAP = {"4k": 100, "2160p": 100, "uhd": 100, "1080p": 80, "fhd": 80, "bdrip": 75, "720p": 60, "remux": 95}
@@ -386,7 +387,6 @@ async def _auto_subscription_task_impl():
     await sync_tmdb_data(force=False, mode="all")
     
     add_log("INFO", "【定时任务】开始处理待搜刮的订阅任务...")
-    pansou_domain = config.get('pansou_domain', "http://192.168.68.200:8080")
     cookie_115 = config.get('cookie_115')
     cookie_quark = config.get('cookie_quark')
     token_aliyun = config.get('token_aliyun')
@@ -422,8 +422,12 @@ async def _auto_subscription_task_impl():
                     add_log("WARNING", f"【搜刮】《{title}》跳过：{ready_msg}")
                     await asyncio.sleep(1)
                     continue
-                ps_res = await client.post(f"{pansou_domain.rstrip('/')}/api/search", json={"kw": title})
-                data = ps_res.json().get("data", {}).get("merged_by_type", {})
+                ps_res = await search_pansou(title, config, client=client)
+                data = ps_res.get("merged_by_type", {})
+                add_log(
+                    "INFO" if ps_res.get("total", 0) else "WARNING",
+                    f"【盘搜】《{title}》来源:{ps_res.get('source') or '未配置'}，返回 {ps_res.get('total', 0)} 条，状态:{ps_res.get('message')}",
+                )
                 
                 if drive_type == 'quark': priorities = ["quark"]
                 elif drive_type == 'aliyun': priorities = ["aliyun"]
