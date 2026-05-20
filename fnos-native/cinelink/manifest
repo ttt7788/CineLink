@@ -14,7 +14,7 @@ os_min_version=0.9.27
 ctl_stop=true
 
 desktop_uidir=ui
-desktop_applaunchname=cinelink.native.main
+desktop_applaunchname=cinelink-native.main
 
 service_port=8000
 checkport=true

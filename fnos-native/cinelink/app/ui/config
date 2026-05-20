@@ -1,6 +1,6 @@
 {
   ".url": {
-    "cinelink.native.main": {
+    "cinelink-native.main": {
       "title": "CineLink",
       "icon": "images/icon-{0}.png",
       "type": "url",
