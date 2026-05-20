@@ -1,12 +1,14 @@
 #!/bin/bash
 set -u
 
-APP_HOME="${TRIM_APPDEST}/cinelink"
-PYTHON_HOME="${TRIM_APPDEST}/python"
+APPDEST="${TRIM_APPDEST:-/tmp/cinelink-native-app}"
+PKGVAR="${TRIM_PKGVAR:-/tmp/cinelink-native-var}"
+APP_HOME="${APPDEST}/cinelink"
+PYTHON_HOME="${APPDEST}/python"
 PYTHON_BIN="${PYTHON_HOME}/bin/python3"
-VENDOR_DIR="${TRIM_APPDEST}/site-packages"
-ENV_FILE="${TRIM_APPDEST}/cinelink-native.env"
-PID_FILE="${TRIM_PKGVAR}/cinelink-native.pid"
+VENDOR_DIR="${APPDEST}/site-packages"
+ENV_FILE="${APPDEST}/cinelink-native.env"
+PID_FILE="${PKGVAR}/cinelink-native.pid"
 
 load_env() {
     if [ -f "$ENV_FILE" ]; then
@@ -14,8 +16,8 @@ load_env() {
         . "$ENV_FILE"
     fi
 
-    CONFIG_DIR="${CINELINK_FNOS_CONFIG_DIR:-/vol1/@appdata/cinelink-native/config}"
-    MEDIA_DIR="${CINELINK_FNOS_MEDIA_DIR:-/vol1/@appdata/cinelink-native/media}"
+    CONFIG_DIR="${CINELINK_FNOS_CONFIG_DIR:-${PKGVAR}/config}"
+    MEDIA_DIR="${CINELINK_FNOS_MEDIA_DIR:-${PKGVAR}/media}"
     WEB_PORT="${CINELINK_FNOS_WEB_PORT:-8000}"
     PLAY_PUBLIC_URL="${CINELINK_FNOS_PLAY_PUBLIC_URL:-http://127.0.0.1:${WEB_PORT}}"
     LOG_DIR="${CONFIG_DIR}/logs"
@@ -36,7 +38,7 @@ load_env() {
     export CINELINK_ALIYUN_STRM_MODE="${CINELINK_ALIYUN_STRM_MODE:-preview}"
     export CINELINK_QUARK_STRM_MODE="${CINELINK_QUARK_STRM_MODE:-preview}"
     export CINELINK_ALIST_ENABLED="${CINELINK_ALIST_ENABLED:-1}"
-    export CINELINK_ALIST_BIN="${TRIM_APPDEST}/bin/alist"
+    export CINELINK_ALIST_BIN="${APPDEST}/bin/alist"
     export CINELINK_ALIST_DATA_DIR="${CONFIG_DIR}/alist"
     export CINELINK_ALIST_BIND_HOST="${CINELINK_ALIST_BIND_HOST:-0.0.0.0}"
     export CINELINK_ALIST_CHECK_HOST="${CINELINK_ALIST_CHECK_HOST:-127.0.0.1}"
