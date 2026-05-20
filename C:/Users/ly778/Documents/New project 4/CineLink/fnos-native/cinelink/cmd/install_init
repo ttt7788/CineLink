@@ -1,0 +1,27 @@
+#!/bin/bash
+set -eu
+
+DEFAULT_CONFIG_DIR="/vol1/@appdata/cinelink-native/config"
+DEFAULT_MEDIA_DIR="/vol1/@appdata/cinelink-native/media"
+
+CONFIG_DIR="${wizard_cinelink_config_dir:-$DEFAULT_CONFIG_DIR}"
+MEDIA_DIR="${wizard_cinelink_media_dir:-$DEFAULT_MEDIA_DIR}"
+WEB_PORT="${wizard_cinelink_web_port:-8000}"
+PLAY_PUBLIC_URL="${wizard_cinelink_play_public_url:-http://127.0.0.1:${WEB_PORT}}"
+ENV_FILE="${TRIM_APPDEST}/cinelink-native.env"
+UI_CONFIG="${TRIM_APPDEST}/ui/config"
+
+mkdir -p "$CONFIG_DIR" "$MEDIA_DIR" "${CONFIG_DIR}/alist" "${CONFIG_DIR}/logs"
+
+cat > "$ENV_FILE" <<EOF
+CINELINK_FNOS_CONFIG_DIR=$CONFIG_DIR
+CINELINK_FNOS_MEDIA_DIR=$MEDIA_DIR
+CINELINK_FNOS_WEB_PORT=$WEB_PORT
+CINELINK_FNOS_PLAY_PUBLIC_URL=$PLAY_PUBLIC_URL
+EOF
+
+if [ -f "$UI_CONFIG" ]; then
+    sed -i "s/\"port\": \"[0-9][0-9]*\"/\"port\": \"$WEB_PORT\"/" "$UI_CONFIG"
+fi
+
+exit 0

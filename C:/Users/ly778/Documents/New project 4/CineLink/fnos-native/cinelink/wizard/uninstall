@@ -1,0 +1,11 @@
+[
+  {
+    "stepTitle": "卸载 CineLink 原生版",
+    "items": [
+      {
+        "type": "tips",
+        "helpText": "卸载应用不会自动删除你配置的数据目录和 STRM 输出目录。"
+      }
+    ]
+  }
+]

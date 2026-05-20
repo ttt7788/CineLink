@@ -1,0 +1,56 @@
+name: Build fnOS native FPK
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+    branches:
+      - codex/docker-package-support
+    paths:
+      - "fnos-native/**"
+      - "requirements.txt"
+      - "*.py"
+      - "static/**"
+      - "templates/**"
+      - ".github/workflows/fnos-native-fpk.yml"
+
+jobs:
+  build-native-fpk:
+    runs-on: ubuntu-latest
+    env:
+      ALIST_VERSION: v3.60.0
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Install build tools
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends rsync curl tar ca-certificates
+
+      - name: Apply tag version to manifest
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          sed -i "s/^version=.*/version=${VERSION}/" fnos-native/cinelink/manifest
+
+      - name: Assemble native fnOS package workspace
+        run: bash fnos-native/scripts/assemble-native.sh
+
+      - name: Download fnpack
+        run: |
+          curl -fsSL -o /tmp/fnpack https://static2.fnnas.com/fnpack/fnpack-1.2.1-linux-amd64
+          chmod +x /tmp/fnpack
+
+      - name: Build native FPK
+        run: |
+          /tmp/fnpack build --directory dist/fnos-native/cinelink
+          mkdir -p dist/fnos-native/artifacts
+          find . -maxdepth 3 -name '*.fpk' -exec cp {} dist/fnos-native/artifacts/ \;
+          ls -lh dist/fnos-native/artifacts
+
+      - name: Upload native FPK artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: cinelink-native-fpk
+          path: dist/fnos-native/artifacts/*.fpk
+          if-no-files-found: error

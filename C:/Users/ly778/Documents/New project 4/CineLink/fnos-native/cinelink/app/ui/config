@@ -1,0 +1,16 @@
+{
+  ".url": {
+    "cinelink.native.main": {
+      "title": "CineLink",
+      "icon": "images/icon-{0}.png",
+      "type": "url",
+      "protocol": "http",
+      "port": "8000",
+      "url": "/",
+      "allUsers": true,
+      "control": {
+        "accessPerm": "readonly"
+      }
+    }
+  }
+}

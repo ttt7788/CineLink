@@ -1,0 +1,125 @@
+#!/bin/bash
+set -u
+
+APP_HOME="${TRIM_APPDEST}/cinelink"
+PYTHON_HOME="${TRIM_APPDEST}/python"
+PYTHON_BIN="${PYTHON_HOME}/bin/python3"
+VENDOR_DIR="${TRIM_APPDEST}/site-packages"
+ENV_FILE="${TRIM_APPDEST}/cinelink-native.env"
+PID_FILE="${TRIM_PKGVAR}/cinelink-native.pid"
+
+load_env() {
+    if [ -f "$ENV_FILE" ]; then
+        # shellcheck disable=SC1090
+        . "$ENV_FILE"
+    fi
+
+    CONFIG_DIR="${CINELINK_FNOS_CONFIG_DIR:-/vol1/@appdata/cinelink-native/config}"
+    MEDIA_DIR="${CINELINK_FNOS_MEDIA_DIR:-/vol1/@appdata/cinelink-native/media}"
+    WEB_PORT="${CINELINK_FNOS_WEB_PORT:-8000}"
+    PLAY_PUBLIC_URL="${CINELINK_FNOS_PLAY_PUBLIC_URL:-http://127.0.0.1:${WEB_PORT}}"
+    LOG_DIR="${CONFIG_DIR}/logs"
+
+    export TZ="${TZ:-Asia/Shanghai}"
+    export PYTHONDONTWRITEBYTECODE=1
+    export PYTHONUNBUFFERED=1
+    export PYTHONPATH="${VENDOR_DIR}:${APP_HOME}${PYTHONPATH:+:$PYTHONPATH}"
+
+    export CINELINK_DATA_DIR="$CONFIG_DIR"
+    export CINELINK_STRM_OUTPUT_DIR="$MEDIA_DIR"
+    export CINELINK_PLAY_PUBLIC_URL="$PLAY_PUBLIC_URL"
+    export CINELINK_DOWNLOAD_URL_CACHE_TTL="${CINELINK_DOWNLOAD_URL_CACHE_TTL:-300}"
+    export CINELINK_PATH_CACHE_TTL="${CINELINK_PATH_CACHE_TTL:-3600}"
+    export CINELINK_PLAY_CHUNK_SIZE="${CINELINK_PLAY_CHUNK_SIZE:-4194304}"
+    export CINELINK_PLAY_LOG_REQUESTS="${CINELINK_PLAY_LOG_REQUESTS:-1}"
+    export CINELINK_STRM_BACKEND="${CINELINK_STRM_BACKEND:-play}"
+    export CINELINK_ALIYUN_STRM_MODE="${CINELINK_ALIYUN_STRM_MODE:-preview}"
+    export CINELINK_QUARK_STRM_MODE="${CINELINK_QUARK_STRM_MODE:-preview}"
+    export CINELINK_ALIST_ENABLED="${CINELINK_ALIST_ENABLED:-1}"
+    export CINELINK_ALIST_BIN="${TRIM_APPDEST}/bin/alist"
+    export CINELINK_ALIST_DATA_DIR="${CONFIG_DIR}/alist"
+    export CINELINK_ALIST_BIND_HOST="${CINELINK_ALIST_BIND_HOST:-0.0.0.0}"
+    export CINELINK_ALIST_CHECK_HOST="${CINELINK_ALIST_CHECK_HOST:-127.0.0.1}"
+    export CINELINK_ALIST_PORT="${CINELINK_ALIST_PORT:-5244}"
+    export CINELINK_ALIST_INTERNAL_URL="${CINELINK_ALIST_INTERNAL_URL:-http://127.0.0.1:5244}"
+    export CINELINK_ALIST_PUBLIC_URL="${CINELINK_ALIST_PUBLIC_URL:-http://127.0.0.1:5244}"
+}
+
+is_running() {
+    if [ ! -f "$PID_FILE" ]; then
+        return 1
+    fi
+    local pid
+    pid="$(cat "$PID_FILE" 2>/dev/null || true)"
+    if [ -z "$pid" ]; then
+        return 1
+    fi
+    kill -0 "$pid" >/dev/null 2>&1
+}
+
+start_app() {
+    load_env
+    if is_running; then
+        exit 0
+    fi
+
+    mkdir -p "$CONFIG_DIR" "$MEDIA_DIR" "$LOG_DIR" "$CINELINK_ALIST_DATA_DIR"
+    if [ ! -x "$PYTHON_BIN" ]; then
+        echo "Python runtime not found: $PYTHON_BIN"
+        exit 1
+    fi
+    if [ ! -x "$CINELINK_ALIST_BIN" ]; then
+        echo "AList binary not found: $CINELINK_ALIST_BIN"
+        exit 1
+    fi
+
+    cd "$APP_HOME"
+    nohup "$PYTHON_BIN" -m uvicorn main:app --host 0.0.0.0 --port "$WEB_PORT" \
+        > "${LOG_DIR}/cinelink.out.log" 2> "${LOG_DIR}/cinelink.err.log" &
+    echo $! > "$PID_FILE"
+    sleep 1
+    if is_running; then
+        exit 0
+    fi
+    exit 1
+}
+
+stop_app() {
+    if ! is_running; then
+        rm -f "$PID_FILE"
+        exit 0
+    fi
+
+    local pid
+    pid="$(cat "$PID_FILE")"
+    kill "$pid" >/dev/null 2>&1 || true
+    for _ in $(seq 1 20); do
+        if ! kill -0 "$pid" >/dev/null 2>&1; then
+            rm -f "$PID_FILE"
+            exit 0
+        fi
+        sleep 1
+    done
+    kill -9 "$pid" >/dev/null 2>&1 || true
+    rm -f "$PID_FILE"
+    exit 0
+}
+
+case "${1:-}" in
+    start)
+        start_app
+        ;;
+    stop)
+        stop_app
+        ;;
+    status)
+        if is_running; then
+            exit 0
+        fi
+        exit 3
+        ;;
+    *)
+        echo "Unknown command: ${1:-}"
+        exit 1
+        ;;
+esac
