@@ -1,0 +1,11 @@
+[
+  {
+    "stepTitle": "卸载 CineLink",
+    "items": [
+      {
+        "type": "tips",
+        "helpText": "卸载应用会停止并移除 Docker 编排。若需保留配置、数据库和 STRM 输出，请在卸载前确认飞牛系统的应用数据保留选项。"
+      }
+    ]
+  }
+]

@@ -1,0 +1,22 @@
+appname=cinelink
+version=2.2.0
+display_name=CineLink 云幕智链
+desc=CineLink 是一个影视资源管理与 STRM 生成工具，支持 TMDB 热门数据、聚合搜索、115/夸克/阿里云盘/123 云盘接入、转存记录、剧集追更、网盘文件管理，以及基于内置 AList 的 STRM 扫描与播放代理。
+platform=all
+source=thirdparty
+
+maintainer=ttt7788
+maintainer_url=https://github.com/ttt7788/CineLink
+distributor=ttt7788
+distributor_url=https://github.com/ttt7788/CineLink
+
+os_min_version=0.9.27
+ctl_stop=true
+
+desktop_uidir=ui
+desktop_applaunchname=cinelink.main
+
+service_port=8000
+checkport=true
+
+changelog=2.2.0：修复 PanSou 搜索参数兼容，新增飞牛 FPK 打包工程，并优化安装目录配置。

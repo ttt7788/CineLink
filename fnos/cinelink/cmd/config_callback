@@ -1,0 +1,19 @@
+#!/bin/bash
+
+DEFAULT_CONFIG_DIR="${TRIM_PKGVAR}/cinelink_config"
+DEFAULT_MEDIA_DIR="${TRIM_PKGVAR}/cinelink_media"
+CONFIG_DIR="${wizard_cinelink_config_dir:-$DEFAULT_CONFIG_DIR}"
+MEDIA_DIR="${wizard_cinelink_media_dir:-$DEFAULT_MEDIA_DIR}"
+WEB_PORT="${wizard_cinelink_web_port:-8000}"
+PLAY_PUBLIC_URL="${wizard_cinelink_play_public_url:-http://127.0.0.1:${WEB_PORT}}"
+
+mkdir -p "$CONFIG_DIR" "$MEDIA_DIR" "${TRIM_APPDEST}/docker"
+
+cat > "${TRIM_APPDEST}/docker/.env" <<EOF
+CINELINK_FNOS_CONFIG_DIR=$CONFIG_DIR
+CINELINK_FNOS_MEDIA_DIR=$MEDIA_DIR
+CINELINK_FNOS_WEB_PORT=$WEB_PORT
+CINELINK_FNOS_PLAY_PUBLIC_URL=$PLAY_PUBLIC_URL
+EOF
+
+exit 0

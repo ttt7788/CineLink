@@ -1,0 +1,75 @@
+[
+  {
+    "stepTitle": "CineLink 配置",
+    "items": [
+      {
+        "type": "tips",
+        "helpText": "这里用于调整 Docker 持久化目录和访问端口。默认目录已预填，可直接保存；如改到共享目录，请确认原目录数据已自行迁移。网盘授权、默认保存目录、STRM 规则、插件与回收站设置请进入 CineLink Web 控制台配置。"
+      },
+      {
+        "type": "text",
+        "field": "wizard_cinelink_config_dir",
+        "label": "配置与数据库目录",
+        "initValue": "/vol1/@appdata/cinelink/config",
+        "rules": [
+          {
+            "required": true,
+            "message": "请输入配置与数据库目录"
+          },
+          {
+            "pattern": "^/",
+            "message": "请填写 Linux 绝对路径"
+          }
+        ]
+      },
+      {
+        "type": "text",
+        "field": "wizard_cinelink_media_dir",
+        "label": "STRM 输出目录",
+        "initValue": "/vol1/@appdata/cinelink/media",
+        "rules": [
+          {
+            "required": true,
+            "message": "请输入 STRM 输出目录"
+          },
+          {
+            "pattern": "^/",
+            "message": "请填写 Linux 绝对路径"
+          }
+        ]
+      },
+      {
+        "type": "text",
+        "field": "wizard_cinelink_web_port",
+        "label": "Web 控制台端口",
+        "initValue": "8000",
+        "rules": [
+          {
+            "required": true,
+            "message": "请输入 Web 控制台端口"
+          },
+          {
+            "pattern": "^[0-9]+$",
+            "message": "端口号必须是数字"
+          }
+        ]
+      },
+      {
+        "type": "text",
+        "field": "wizard_cinelink_play_public_url",
+        "label": "播放代理公开地址",
+        "initValue": "http://127.0.0.1:8000",
+        "rules": [
+          {
+            "required": true,
+            "message": "请输入播放代理公开地址"
+          },
+          {
+            "pattern": "^https?://",
+            "message": "请填写 http:// 或 https:// 开头的地址"
+          }
+        ]
+      }
+    ]
+  }
+]

@@ -1,0 +1,26 @@
+{
+  "data-share": {
+    "shares": [
+      {
+        "name": "media",
+        "permission": {
+          "rw": ["cinelink"]
+        }
+      },
+      {
+        "name": "config",
+        "permission": {
+          "rw": ["cinelink"]
+        }
+      }
+    ]
+  },
+  "docker-project": {
+    "projects": [
+      {
+        "name": "cinelink",
+        "path": "docker"
+      }
+    ]
+  }
+}

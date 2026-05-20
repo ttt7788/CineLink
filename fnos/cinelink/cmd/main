@@ -1,0 +1,37 @@
+#!/bin/bash
+
+FILE_PATH="${TRIM_APPDEST}/docker/docker-compose.yaml"
+
+is_docker_running() {
+    local docker_name=""
+
+    if [ -f "$FILE_PATH" ]; then
+        docker_name=$(grep "container_name" "$FILE_PATH" | awk -F ':' '{print $2}' | xargs)
+    fi
+
+    if [ -z "$docker_name" ]; then
+        echo "未找到 CineLink 容器名"
+        exit 3
+    fi
+
+    docker inspect "$docker_name" | grep -q '"Status": "running",'
+}
+
+case "$1" in
+    start)
+        exit 0
+        ;;
+    stop)
+        exit 0
+        ;;
+    status)
+        if is_docker_running; then
+            exit 0
+        fi
+        exit 3
+        ;;
+    *)
+        echo "未知命令: $1"
+        exit 1
+        ;;
+esac

@@ -20,6 +20,8 @@ third_party/
 server.out.log
 server.err.log
 dist/
+*.fpk
+fnos/tools/
 
 .env
 .env.*
