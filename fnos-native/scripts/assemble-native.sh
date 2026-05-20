@@ -76,17 +76,27 @@ curl -fsSL -o "${BUILD_ROOT}/python.tar.gz" "$PYTHON_URL"
 tar -xzf "${BUILD_ROOT}/python.tar.gz" -C "${PACKAGE_DIR}/app"
 rm -f "${BUILD_ROOT}/python.tar.gz"
 
-if [ -x "${PACKAGE_DIR}/app/python/install/bin/python3" ]; then
-  rsync -a "${PACKAGE_DIR}/app/python/install/" "${PACKAGE_DIR}/app/python-normalized/"
+PYTHON_BIN="$(find "${PACKAGE_DIR}/app" -path '*/bin/python3*' -type f | head -n 1)"
+if [ -z "$PYTHON_BIN" ] || [ ! -x "$PYTHON_BIN" ]; then
+  echo "Portable Python binary not found" >&2
+  find "${PACKAGE_DIR}/app" -maxdepth 5 -type f -path '*/bin/*' | sort >&2 || true
+  exit 1
+fi
+
+PYTHON_ROOT="$(cd "$(dirname "$PYTHON_BIN")/.." && pwd)"
+TARGET_PYTHON_ROOT="$(cd "${PACKAGE_DIR}/app" && pwd)/python"
+if [ "$PYTHON_ROOT" != "$TARGET_PYTHON_ROOT" ]; then
+  rm -rf "${PACKAGE_DIR}/app/python-normalized"
+  rsync -a "${PYTHON_ROOT}/" "${PACKAGE_DIR}/app/python-normalized/"
   rm -rf "${PACKAGE_DIR}/app/python"
   mv "${PACKAGE_DIR}/app/python-normalized" "${PACKAGE_DIR}/app/python"
 fi
 
-PYTHON_BIN="$(find "${PACKAGE_DIR}/app/python" -path '*/bin/python3' -type f | head -n 1)"
-if [ -z "$PYTHON_BIN" ] || [ ! -x "$PYTHON_BIN" ]; then
-  echo "Portable Python binary not found" >&2
-  exit 1
+PYTHON_BIN="${PACKAGE_DIR}/app/python/bin/$(basename "$PYTHON_BIN")"
+if [ ! -e "${PACKAGE_DIR}/app/python/bin/python3" ]; then
+  ln -s "$(basename "$PYTHON_BIN")" "${PACKAGE_DIR}/app/python/bin/python3"
 fi
+PYTHON_BIN="${PACKAGE_DIR}/app/python/bin/python3"
 
 echo "Installing Python dependencies..."
 "$PYTHON_BIN" -m ensurepip --upgrade >/dev/null 2>&1 || true
