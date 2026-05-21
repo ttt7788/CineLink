@@ -5,7 +5,7 @@ APPDEST="${TRIM_APPDEST:-/tmp/cinelinknative-app}"
 PKGVAR="${TRIM_PKGVAR:-/tmp/cinelinknative-var}"
 APP_HOME="${APPDEST}/cinelink"
 PYTHON_HOME="${APPDEST}/python"
-PYTHON_BIN="${PYTHON_HOME}/bin/python3"
+PYTHON_BIN="${PYTHON_HOME}/bin/python3.12"
 VENDOR_DIR="${APPDEST}/site-packages"
 ENV_FILE="${APPDEST}/cinelinknative.env"
 PID_FILE="${PKGVAR}/cinelinknative.pid"
@@ -66,6 +66,9 @@ start_app() {
     fi
 
     mkdir -p "$CONFIG_DIR" "$MEDIA_DIR" "$LOG_DIR" "$CINELINK_ALIST_DATA_DIR"
+    if [ ! -x "$PYTHON_BIN" ] && [ -x "${PYTHON_HOME}/bin/python3" ]; then
+        PYTHON_BIN="${PYTHON_HOME}/bin/python3"
+    fi
     if [ ! -x "$PYTHON_BIN" ]; then
         echo "Python runtime not found: $PYTHON_BIN"
         exit 1

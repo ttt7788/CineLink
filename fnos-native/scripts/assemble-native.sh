@@ -93,10 +93,10 @@ if [ "$PYTHON_ROOT" != "$TARGET_PYTHON_ROOT" ]; then
 fi
 
 PYTHON_BIN="${PACKAGE_DIR}/app/python/bin/$(basename "$PYTHON_BIN")"
-if [ ! -e "${PACKAGE_DIR}/app/python/bin/python3" ]; then
-  ln -s "$(basename "$PYTHON_BIN")" "${PACKAGE_DIR}/app/python/bin/python3"
+if [ ! -x "${PACKAGE_DIR}/app/python/bin/python3.12" ] && [ -x "$PYTHON_BIN" ]; then
+  cp "$PYTHON_BIN" "${PACKAGE_DIR}/app/python/bin/python3.12"
 fi
-PYTHON_BIN="${PACKAGE_DIR}/app/python/bin/python3"
+PYTHON_BIN="${PACKAGE_DIR}/app/python/bin/python3.12"
 
 echo "Installing Python dependencies..."
 "$PYTHON_BIN" -m ensurepip --upgrade >/dev/null 2>&1 || true
@@ -104,6 +104,10 @@ echo "Installing Python dependencies..."
 "$PYTHON_BIN" -m pip install -r "${ROOT_DIR}/requirements.txt" --target "${PACKAGE_DIR}/app/site-packages"
 
 find "$PACKAGE_DIR" -type d -name '__pycache__' -prune -exec rm -rf {} +
+# fnOS applies directory permissions during install. Keep the app payload free
+# of symlinks so recursive permission handling cannot fail on self-referential
+# or platform-specific links from portable Python builds.
+find "$PACKAGE_DIR" -type l -delete
 find "${PACKAGE_DIR}/cmd" -type f -exec chmod +x {} +
 
 echo "Native package workspace prepared at ${PACKAGE_DIR}"

@@ -36,6 +36,13 @@ jobs:
       - name: Assemble native fnOS package workspace
         run: bash fnos-native/scripts/assemble-native.sh
 
+      - name: Verify native payload has no symlinks
+        run: |
+          if find dist/fnos-native/cinelink -type l | grep -n .; then
+            echo "Native FPK payload must not contain symlinks."
+            exit 1
+          fi
+
       - name: Download fnpack
         run: |
           curl -fsSL -o /tmp/fnpack https://static2.fnnas.com/fnpack/fnpack-1.2.1-linux-amd64
