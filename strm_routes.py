@@ -13,6 +13,7 @@ strm_router = APIRouter()
 INTERNAL_ROOTS = {"115_internal": "/115", "aliyun_internal": "/aliyun", "quark_internal": "/quark", "123_internal": "/123"}
 INTERNAL_DRIVES = {"115_internal": "115", "aliyun_internal": "aliyun", "quark_internal": "quark", "123_internal": "123"}
 INTERNAL_SAVE_DIR_KEYS = {"115": "drive115_save_dir", "aliyun": "aliyun_save_dir", "quark": "quark_save_dir", "123": "drive123_save_dir"}
+DEFAULT_STRM_OUTPUT_DIR = os.environ.get("CINELINK_STRM_OUTPUT_DIR", "/data/media")
 
 
 def clean_config_dir_id(value, fallback=""):
@@ -33,6 +34,40 @@ def normalize_internal_rootpath(source_type, rootpath):
     if raw == base or raw.startswith(base.rstrip("/") + "/"):
         return raw.rstrip("/")
     return (base.rstrip("/") + "/" + raw.strip("/")).rstrip("/")
+
+
+def local_fs_path(path):
+    if os.name != "nt":
+        return path
+    normalized = os.path.abspath(os.path.normpath(path))
+    return normalized if normalized.startswith("\\\\?\\") else "\\\\?\\" + normalized
+
+
+def validate_target_directory(target_directory: str):
+    target = str(target_directory or "").strip()
+    if not target:
+        return
+    if os.name != "nt" and (target.startswith("\\") or "\\" in target or (len(target) > 2 and target[1:3] in (":\\", ":/"))):
+        raise HTTPException(
+            status_code=400,
+            detail=f"STRM 输出目录需要填写 Linux 绝对路径，当前路径不可用: {target}",
+        )
+    if not os.path.isabs(target):
+        raise HTTPException(
+            status_code=400,
+            detail=f"STRM 输出目录需要填写绝对路径，留空则自动使用默认目录: {DEFAULT_STRM_OUTPUT_DIR}",
+        )
+    probe = os.path.join(target, ".cinelink_write_test")
+    try:
+        os.makedirs(local_fs_path(target), exist_ok=True)
+        with open(local_fs_path(probe), "w", encoding="utf-8") as fh:
+            fh.write("ok")
+        os.remove(local_fs_path(probe))
+    except Exception as e:
+        raise HTTPException(
+            status_code=400,
+            detail=f"目录无权限，无法写入 STRM 输出目录: {target}。请在飞牛应用权限中授权该目录读写，或留空使用默认目录 {DEFAULT_STRM_OUTPUT_DIR}。原因: {e}",
+        )
 
 
 def normalize_strm_config(config: StrmConfigModel):
@@ -57,8 +92,9 @@ def get_strm_configs():
 
 @strm_router.post("/api/strm/configs")
 def add_strm_config(config: StrmConfigModel):
-    conn = get_db()
     source_type, url, username, password, rootpath, root_id = normalize_strm_config(config)
+    validate_target_directory(config.target_directory)
+    conn = get_db()
     conn.execute('''INSERT INTO strm_configs
         (source_type, config_name, url, username, password, rootpath, root_id, target_directory, download_enabled, update_mode, download_interval_range)
         VALUES (?,?,?,?,?,?,?,?,?,?,?)''',
@@ -70,8 +106,9 @@ def add_strm_config(config: StrmConfigModel):
 
 @strm_router.put("/api/strm/configs/{config_id}")
 def update_strm_config(config_id: int, config: StrmConfigModel):
-    conn = get_db()
     source_type, url, username, password, rootpath, root_id = normalize_strm_config(config)
+    validate_target_directory(config.target_directory)
+    conn = get_db()
     conn.execute('''UPDATE strm_configs SET
         source_type=?, config_name=?, url=?, username=?, password=?, rootpath=?, root_id=?, target_directory=?,
         download_enabled=?, update_mode=?, download_interval_range=? WHERE id=?''',

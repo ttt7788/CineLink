@@ -75,7 +75,7 @@ const useStrm = (API_BASE, ElMessage, msgBox, options = {}) => {
             if (isEditingConfig.value) { await axios.put(`${API_BASE}/strm/configs/${editingConfigId.value}`, newStrmConfig.value); }
             else { await axios.post(`${API_BASE}/strm/configs`, newStrmConfig.value); }
             ElMessage.success('操作成功'); showStrmDialog.value = false; loadStrmConfigs();
-        } catch (err) { ElMessage.error('操作失败'); }
+        } catch (err) { ElMessage.error(err.response?.data?.detail || err.response?.data?.message || '操作失败'); }
     };
     const deleteStrmConfig = async (id) => { try { await msgBox.confirm('确定删除?'); await axios.delete(`${API_BASE}/strm/configs/${id}`); loadStrmConfigs(); } catch (e) {} };
     const runStrmTask = async (id) => {
