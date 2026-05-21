@@ -1,11 +1,13 @@
-import os
 import json
+import os
+import re
 from typing import Any
 
 import httpx
 
 
 DEFAULT_PANSOU_DOMAIN = os.environ.get("CINELINK_PANSOU_URL", "")
+PANSOU_TIMEOUT = httpx.Timeout(90.0, connect=15.0, read=90.0, write=30.0, pool=15.0)
 
 
 def resolve_pansou_domain(config: dict[str, Any] | None = None) -> str:
@@ -93,6 +95,48 @@ def _format_request_error(exc: Exception) -> str:
     return f"{exc.__class__.__name__}: {exc or repr(exc)}"
 
 
+def _compact_text(text: str) -> str:
+    return re.sub(r"[\s·:：\-—_《》【】\[\]（）()，,。.!！?？/\\]+", "", text or "").lower()
+
+
+def _filter_normalized_by_keyword(normalized: dict[str, Any], keyword: str) -> dict[str, Any]:
+    compact_keyword = _compact_text(keyword)
+    parts = [
+        _compact_text(part)
+        for part in re.split(r"[\s·:：\-—_《》【】\[\]（）()，,。.!！?？/\\]+", keyword or "")
+        if len(_compact_text(part)) >= 2
+    ]
+    terms = [term for term in [compact_keyword, *parts] if term]
+    if not terms:
+        return normalized
+
+    filtered: dict[str, list[dict[str, Any]]] = {}
+    for drive_type, items in (normalized.get("merged_by_type") or {}).items():
+        for item in items:
+            haystack = _compact_text(
+                " ".join(
+                    str(item.get(key, ""))
+                    for key in ("note", "title", "content", "work_title", "source", "url")
+                )
+            )
+            if any(term in haystack for term in terms):
+                filtered.setdefault(drive_type, []).append(item)
+
+    return {
+        **normalized,
+        "total": sum(len(items) for items in filtered.values()),
+        "merged_by_type": filtered,
+    }
+
+
+async def _check_health(client: httpx.AsyncClient, domain: str) -> str:
+    try:
+        res = await client.get(f"{domain}/api/health", timeout=httpx.Timeout(8.0, connect=3.0))
+        return f"健康检查 HTTP {res.status_code}"
+    except Exception as exc:
+        return f"健康检查失败: {_format_request_error(exc)}"
+
+
 async def search_pansou(
     keyword: str,
     config: dict[str, Any] | None = None,
@@ -106,14 +150,10 @@ async def search_pansou(
         return {"ok": False, "message": "未配置盘搜 API 接口地址", "source": "", "total": 0, "merged_by_type": {}}
 
     close_client = client is None
-    active_client = client or httpx.AsyncClient(timeout=httpx.Timeout(60.0, connect=8.0))
-    compatible_payload = {"keyword": kw, "res": "merge", "src": "all"}
-    official_payload = {"kw": kw, "res": "merge", "src": "all"}
+    active_client = client or httpx.AsyncClient(timeout=PANSOU_TIMEOUT)
     attempts = [
-        ("POST", "/api/search", {"json": compatible_payload}),
-        ("POST", "/api/search", {"json": official_payload}),
-        ("GET", "/api/search", {"params": compatible_payload}),
-        ("GET", "/api/search", {"params": official_payload}),
+        ("POST", "/api/search", {"json": {"kw": kw, "res": "merge", "src": "all"}}),
+        ("GET", "/api/search", {"params": {"kw": kw, "res": "merge", "src": "all"}}),
     ]
     best_result: dict[str, Any] | None = None
     errors: list[str] = []
@@ -121,14 +161,13 @@ async def search_pansou(
         for method, path, kwargs in attempts:
             try:
                 if method == "POST":
-                    res = await active_client.post(f"{domain}{path}", **kwargs)
+                    res = await active_client.post(f"{domain}{path}", timeout=PANSOU_TIMEOUT, **kwargs)
                 else:
-                    res = await active_client.get(f"{domain}{path}", **kwargs)
+                    res = await active_client.get(f"{domain}{path}", timeout=PANSOU_TIMEOUT, **kwargs)
                 res.raise_for_status()
                 raw = res.json()
                 normalized = normalize_pansou_response(raw)
                 message = normalized.get("raw_message") or "success"
-                request_key = next(iter(kwargs.get("json") or kwargs.get("params") or {}), "")
                 current = {
                     "ok": True,
                     "message": message,
@@ -136,7 +175,7 @@ async def search_pansou(
                     "total": normalized["total"],
                     "merged_by_type": normalized["merged_by_type"],
                     "raw": raw,
-                    "request_mode": f"{method} {path} {request_key}",
+                    "request_mode": f"{method} {path} kw",
                 }
                 if normalized["total"] > 0 or normalized["merged_by_type"]:
                     return current
@@ -146,12 +185,33 @@ async def search_pansou(
                 errors.append(f"{method} {path}: {_format_request_error(exc)}")
 
         if best_result is not None:
+            fallback_payload = {"keyword": kw, "res": "merge", "src": "all"}
+            try:
+                res = await active_client.post(f"{domain}/api/search", timeout=PANSOU_TIMEOUT, json=fallback_payload)
+                res.raise_for_status()
+                raw = res.json()
+                normalized = _filter_normalized_by_keyword(normalize_pansou_response(raw), kw)
+                if normalized["total"] > 0 or normalized["merged_by_type"]:
+                    return {
+                        "ok": True,
+                        "message": "success，已使用兼容参数并按关键词过滤",
+                        "source": domain,
+                        "total": normalized["total"],
+                        "merged_by_type": normalized["merged_by_type"],
+                        "raw": raw,
+                        "request_mode": "POST /api/search keyword-filtered",
+                    }
+            except Exception as exc:
+                errors.append(f"POST /api/search keyword-filtered: {_format_request_error(exc)}")
             return best_result
+
+        health_msg = await _check_health(active_client, domain)
         raise RuntimeError("; ".join(errors) if errors else "all request attempts failed")
     except Exception as exc:
+        extra = f"；{health_msg}" if "health_msg" in locals() else ""
         return {
             "ok": False,
-            "message": f"无法连接盘搜接口: {exc}",
+            "message": f"无法连接盘搜接口: {exc}{extra}",
             "source": domain,
             "total": 0,
             "merged_by_type": {},
