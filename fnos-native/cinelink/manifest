@@ -1,4 +1,4 @@
-appname=cinelink-native
+appname=cinelinknative
 version=2.2.0
 display_name=CineLink 云幕智链 原生版
 desc=CineLink 原生版不依赖 Docker 运行，内置 Linux Python 运行时、AList 与项目依赖，支持影视资源管理、聚合搜索、网盘转存、剧集追更、网盘文件管理和 STRM 生成播放。
@@ -14,7 +14,7 @@ os_min_version=0.9.27
 ctl_stop=true
 
 desktop_uidir=ui
-desktop_applaunchname=cinelink-native.main
+desktop_applaunchname=cinelinknative.main
 
 service_port=8000
 checkport=true

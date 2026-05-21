@@ -10,7 +10,7 @@
         "type": "text",
         "field": "wizard_cinelink_config_dir",
         "label": "配置与数据库目录",
-        "initValue": "/vol1/@appdata/cinelink-native/config",
+        "initValue": "/vol1/@appdata/cinelinknative/config",
         "rules": [
           {
             "required": true,
@@ -26,7 +26,7 @@
         "type": "text",
         "field": "wizard_cinelink_media_dir",
         "label": "STRM 输出目录",
-        "initValue": "/vol1/@appdata/cinelink-native/media",
+        "initValue": "/vol1/@appdata/cinelinknative/media",
         "rules": [
           {
             "required": true,

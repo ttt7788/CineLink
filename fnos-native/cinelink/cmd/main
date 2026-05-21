@@ -1,14 +1,14 @@
 #!/bin/bash
 set -u
 
-APPDEST="${TRIM_APPDEST:-/tmp/cinelink-native-app}"
-PKGVAR="${TRIM_PKGVAR:-/tmp/cinelink-native-var}"
+APPDEST="${TRIM_APPDEST:-/tmp/cinelinknative-app}"
+PKGVAR="${TRIM_PKGVAR:-/tmp/cinelinknative-var}"
 APP_HOME="${APPDEST}/cinelink"
 PYTHON_HOME="${APPDEST}/python"
 PYTHON_BIN="${PYTHON_HOME}/bin/python3"
 VENDOR_DIR="${APPDEST}/site-packages"
-ENV_FILE="${APPDEST}/cinelink-native.env"
-PID_FILE="${PKGVAR}/cinelink-native.pid"
+ENV_FILE="${APPDEST}/cinelinknative.env"
+PID_FILE="${PKGVAR}/cinelinknative.pid"
 
 load_env() {
     if [ -f "$ENV_FILE" ]; then

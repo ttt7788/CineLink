@@ -27,8 +27,8 @@ chmod +x /tmp/fnpack
 
 Default install paths:
 
-- Config and database: `/vol1/@appdata/cinelink-native/config`
-- STRM output: `/vol1/@appdata/cinelink-native/media`
+- Config and database: `/vol1/@appdata/cinelinknative/config`
+- STRM output: `/vol1/@appdata/cinelinknative/media`
 - Web port: `8000`
 - Playback public URL: `http://127.0.0.1:8000`
 

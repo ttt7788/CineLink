@@ -1,25 +1,25 @@
 #!/bin/bash
 
-APPDEST="${TRIM_APPDEST:-/tmp/cinelink-native-app}"
-PKGVAR="${TRIM_PKGVAR:-/tmp/cinelink-native-var}"
+APPDEST="${TRIM_APPDEST:-/tmp/cinelinknative-app}"
+PKGVAR="${TRIM_PKGVAR:-/tmp/cinelinknative-var}"
 LOG_FILE="${PKGVAR}/install.log"
 
 mkdir -p "$PKGVAR" >/dev/null 2>&1 || true
-touch "$LOG_FILE" >/dev/null 2>&1 || LOG_FILE="/tmp/cinelink-native-install.log"
+touch "$LOG_FILE" >/dev/null 2>&1 || LOG_FILE="/tmp/cinelinknative-install.log"
 exec >>"$LOG_FILE" 2>&1
 
 echo "[install_init] start $(date '+%F %T')"
 
 DEFAULT_CONFIG_DIR="${PKGVAR}/config"
 DEFAULT_MEDIA_DIR="${PKGVAR}/media"
-SUGGEST_CONFIG_DIR="/vol1/@appdata/cinelink-native/config"
-SUGGEST_MEDIA_DIR="/vol1/@appdata/cinelink-native/media"
+SUGGEST_CONFIG_DIR="/vol1/@appdata/cinelinknative/config"
+SUGGEST_MEDIA_DIR="/vol1/@appdata/cinelinknative/media"
 
 CONFIG_DIR="${wizard_cinelink_config_dir:-$SUGGEST_CONFIG_DIR}"
 MEDIA_DIR="${wizard_cinelink_media_dir:-$SUGGEST_MEDIA_DIR}"
 WEB_PORT="${wizard_cinelink_web_port:-8000}"
 PLAY_PUBLIC_URL="${wizard_cinelink_play_public_url:-http://127.0.0.1:${WEB_PORT}}"
-ENV_FILE="${APPDEST}/cinelink-native.env"
+ENV_FILE="${APPDEST}/cinelinknative.env"
 UI_CONFIG="${APPDEST}/ui/config"
 
 prepare_dir() {
