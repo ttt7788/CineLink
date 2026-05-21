@@ -4,7 +4,7 @@
     "items": [
       {
         "type": "tips",
-        "helpText": "CineLink 原生版不依赖 Docker 运行。下面已填写默认目录，小白用户可直接下一步；需要放到指定共享目录时，可自行修改为 Linux 绝对路径。"
+        "helpText": "下面已填好默认目录。STRM 播放地址会按这里配置的公开地址生成，播放器需要能访问这些地址。"
       },
       {
         "type": "text",
@@ -57,12 +57,28 @@
       {
         "type": "text",
         "field": "wizard_cinelink_play_public_url",
-        "label": "播放代理公开地址",
-        "initValue": "http://127.0.0.1:8000",
+        "label": "CineLink 播放代理公开地址",
+        "initValue": "http://192.168.68.200:8000",
         "rules": [
           {
             "required": true,
-            "message": "请输入播放代理公开地址"
+            "message": "请输入 CineLink 播放代理公开地址"
+          },
+          {
+            "pattern": "^https?://",
+            "message": "请填写 http:// 或 https:// 开头的地址"
+          }
+        ]
+      },
+      {
+        "type": "text",
+        "field": "wizard_cinelink_alist_public_url",
+        "label": "AList 公开播放地址",
+        "initValue": "http://192.168.68.200:5244",
+        "rules": [
+          {
+            "required": true,
+            "message": "请输入 AList 公开播放地址"
           },
           {
             "pattern": "^https?://",
