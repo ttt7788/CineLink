@@ -17,6 +17,7 @@ from drive_api import Drive115, QuarkDrive, Drive123Open
 from aliyun_drive_mobile import AliyunDrive
 from pancheck_client import check_link_validity, infer_pancheck_platform
 from pansou_client import search_pansou
+from p115_runtime import ensure_p115_runtime_home
 from series_bindings import bind_series_after_transfer, ensure_series_target_folder, rebuild_success_series_bindings
 
 router = APIRouter()
@@ -695,6 +696,7 @@ def build_qrcode_data_url(text: str):
 @router.get("/api/115/qrcode")
 async def get_115_qr():
     try:
+        ensure_p115_runtime_home()
         from p115client import P115Client
 
         data = P115Client.login_qrcode_token(app=ALIST_115_QRCODE_APP, headers=HEADERS_115)
@@ -731,6 +733,7 @@ async def get_115_st(p: QrcodeStatusModel):
 @router.post("/api/115/login")
 async def log_115(p: QrcodeLoginModel):
     try:
+        ensure_p115_runtime_home()
         from p115client import P115Client
 
         res_json = P115Client.login_qrcode_scan_result(p.uid, app=ALIST_115_QRCODE_APP, headers=HEADERS_115)

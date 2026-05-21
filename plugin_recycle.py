@@ -11,6 +11,7 @@ from config_guard import get_drive_config_status, require_drive_ready
 from database import get_db, get_sys_config
 from drive_api import QuarkDrive
 from logger import add_log
+from p115_runtime import ensure_p115_runtime_home
 
 router = APIRouter()
 
@@ -140,6 +141,7 @@ def _normalize_item(drive_type, item):
 async def _list_115_recycle(cookie, limit=100):
     if not cookie:
         return [], "未配置 115 Cookie"
+    ensure_p115_runtime_home()
     from p115client import P115Client
 
     client = P115Client(cookie)
@@ -155,6 +157,7 @@ async def _list_115_recycle(cookie, limit=100):
 async def _empty_115_recycle(cookie, password=""):
     if not cookie:
         return False, "未配置 115 Cookie"
+    ensure_p115_runtime_home()
     from p115client import P115Client
 
     payload = {"password": password or "000000"}

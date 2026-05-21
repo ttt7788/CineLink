@@ -30,6 +30,9 @@ load_env() {
     export CINELINK_DATA_DIR="$CONFIG_DIR"
     export CINELINK_STRM_OUTPUT_DIR="$MEDIA_DIR"
     export CINELINK_PLAY_PUBLIC_URL="$PLAY_PUBLIC_URL"
+    export HOME="${CINELINK_FNOS_HOME_DIR:-${CONFIG_DIR}/home}"
+    export XDG_CACHE_HOME="${XDG_CACHE_HOME:-${CONFIG_DIR}/cache}"
+    export CINELINK_P115_HOME="${CINELINK_P115_HOME:-${CONFIG_DIR}/p115_home}"
     export CINELINK_DOWNLOAD_URL_CACHE_TTL="${CINELINK_DOWNLOAD_URL_CACHE_TTL:-300}"
     export CINELINK_PATH_CACHE_TTL="${CINELINK_PATH_CACHE_TTL:-3600}"
     export CINELINK_PLAY_CHUNK_SIZE="${CINELINK_PLAY_CHUNK_SIZE:-4194304}"
@@ -65,7 +68,7 @@ start_app() {
         exit 0
     fi
 
-    mkdir -p "$CONFIG_DIR" "$MEDIA_DIR" "$LOG_DIR" "$CINELINK_ALIST_DATA_DIR"
+    mkdir -p "$CONFIG_DIR" "$MEDIA_DIR" "$LOG_DIR" "$HOME" "$XDG_CACHE_HOME" "$CINELINK_P115_HOME/.p115client.cache.d" "$CINELINK_ALIST_DATA_DIR"
     if [ ! -x "$PYTHON_BIN" ] && [ -x "${PYTHON_HOME}/bin/python3" ]; then
         PYTHON_BIN="${PYTHON_HOME}/bin/python3"
     fi

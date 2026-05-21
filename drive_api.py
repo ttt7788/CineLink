@@ -5,6 +5,8 @@ import re
 import time
 from urllib.parse import parse_qs, urlparse
 
+from p115_runtime import ensure_p115_runtime_home
+
 VALID_VIDEO_EXTS = (
     '.mp4', '.mkv', '.avi', '.mov', '.flv', '.wmv', '.ts', '.m2ts',
     '.rmvb', '.iso', '.vob', '.webm', '.srt', '.ass', '.sub', '.nfo'
@@ -298,6 +300,7 @@ class Drive115:
             return None, "115 文件缺少 pickcode"
 
         try:
+            ensure_p115_runtime_home()
             from p115client import P115Client
             url = P115Client(self.cookie).download_url(pickcode, app="chrome")
             if url:
@@ -433,6 +436,7 @@ class Drive115:
             return False, f"115 离线下载失败: {str(e)}"
 
     def _client(self):
+        ensure_p115_runtime_home()
         from p115client import P115Client
         return P115Client(self.cookie)
 
