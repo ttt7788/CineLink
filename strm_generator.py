@@ -106,6 +106,17 @@ def local_fs_path(path):
     normalized = os.path.abspath(os.path.normpath(path))
     return normalized if normalized.startswith("\\\\?\\") else "\\\\?\\" + normalized
 
+def path_is_writable(path):
+    try:
+        os.makedirs(local_fs_path(path), exist_ok=True)
+        probe = os.path.join(path, ".cinelink_write_test")
+        with open(local_fs_path(probe), "w", encoding="utf-8") as fh:
+            fh.write("ok")
+        os.remove(local_fs_path(probe))
+        return True, ""
+    except Exception as e:
+        return False, str(e)
+
 def normalize_target_directory(config):
     target = str(config.get('target_directory') or "").strip()
     source_name = str(config.get('source_type') or "webdav").replace("_internal", "")
@@ -120,7 +131,16 @@ def normalize_target_directory(config):
         return fallback
 
     if target.startswith("/"):
-        return posixpath.normpath(target)
+        normalized = posixpath.normpath(target)
+        ok, reason = path_is_writable(normalized)
+        if ok:
+            return normalized
+        fallback_ok, fallback_reason = path_is_writable(fallback)
+        if fallback_ok:
+            add_log("WARNING", f"⚠️ STRM 节点 [{config['config_name']}] 输出目录不可写 [{normalized}]，自动改用: {fallback}，原因: {reason}")
+            return fallback
+        add_log("ERROR", f"❌ STRM 节点 [{config['config_name']}] 输出目录不可写 [{normalized}]，默认目录也不可写 [{fallback}] -> {fallback_reason}")
+        return normalized
 
     if not os.path.isabs(target):
         fixed = join_output_path(DEFAULT_STRM_OUTPUT_DIR, target)
