@@ -28,6 +28,9 @@ services:
       # 容器时区。
       - TZ=Asia/Shanghai
 
+      # 运行环境标识，用于错误提示区分 Docker 与 fnOS 原生包。
+      - CINELINK_RUNTIME=docker
+
       # CineLink 数据目录，必须持久化。
       - CINELINK_DATA_DIR=/app/data
 
@@ -52,7 +55,7 @@ services:
 
       # 阿里云盘、夸克默认使用预览/转码播放地址策略。
       - CINELINK_ALIYUN_STRM_MODE=preview
-      - CINELINK_QUARK_STRM_MODE=preview
+      - CINELINK_QUARK_STRM_MODE=alist
 
       # 启用内置 AList，用于网盘挂载、STRM 扫描和播放。
       - CINELINK_ALIST_ENABLED=1

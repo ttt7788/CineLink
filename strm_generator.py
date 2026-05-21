@@ -385,7 +385,7 @@ def scan_internal_directories_by_id(config, script_config, existing_records):
     drive = INTERNAL_SOURCE_DRIVE.get(config.get("source_type"), "")
     provider = INTERNAL_DRIVE_PROVIDERS.get(drive)
     root_id = str(config.get("root_id") or "").strip()
-    if not provider or internal_root_is_default(drive, root_id):
+    if INTERNAL_STRM_BACKEND == "alist" or not provider or internal_root_is_default(drive, root_id):
         scan_alist_directories_concurrently(config, script_config, existing_records)
         return
 

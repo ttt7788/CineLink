@@ -26,11 +26,11 @@ LOG_MODULES = {
 _MODULE_RULES = [
     ("startup", ("启动检查", "CineLink 核心引擎", "系统启动", "SQLite 数据库")),
     ("tmdb", ("今日热门", "库同步", "电影库", "剧集库", "TMDB", "基础库")),
-    ("subscription", ("定时任务", "搜刮", "推送", "自动订阅", "成功", "失败", "重试", "跳过")),
+    ("strm", ("STRM", "strm", "STRM写入进度", "STRM 写入进度", "映射", "元数据下载进度", "AList 扫描进度", "数据库比对缓存")),
+    ("subscription", ("定时任务", "搜刮", "推送", "自动订阅", "候选资源", "目标网盘", "资源已入库", "全部尝试失败", "网盘已有极佳版本")),
     ("manual_transfer", ("手动转存",)),
     ("transfer", ("转存下载",)),
     ("series", ("剧集绑定", "剧集追更")),
-    ("strm", ("STRM", "strm")),
     ("drive", ("内置网盘", "网盘", "目录读取", "下载地址获取")),
     ("play", ("播放代理", "AList 播放")),
     ("alist", ("内置AList", "内置 AList")),
@@ -44,9 +44,11 @@ _MODULE_RULES = [
 def infer_log_module(message: str, module: str = "") -> str:
     """Return a stable module key for log filtering."""
     explicit = (module or "").strip()
+    text = str(message or "")
+    if "STRM" in text or "strm" in text:
+        return "strm"
     if explicit:
         return explicit
-    text = str(message or "")
     bracket = re.match(r"^[\s🚀✅🌐🎉🛑⏰🧩🔗📁📄⚠️❌]*【([^】]+)】", text)
     if bracket:
         label = bracket.group(1)
