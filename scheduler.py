@@ -19,8 +19,8 @@ VALID_VIDEO_EXTS = (
 
 TMDB_TRENDING_PAGES = 10
 TMDB_BASE_PAGES = 500
-TMDB_BATCH_SIZE = 50
-TMDB_CONCURRENCY = 20
+TMDB_BATCH_SIZE = 20
+TMDB_CONCURRENCY = 8
 TMDB_BASE_MIN_COUNT = 10000
 _tmdb_sync_locks = {
     "trending": asyncio.Lock(),
@@ -237,13 +237,26 @@ async def sync_tmdb_data(force=False, mode="all"):
             return
 
     async def fetch_json(client, path, params):
-        try:
-            res = await client.get(f"{base_url}{path}", params=params)
-            if res.status_code == 200:
-                return res.json().get('results', [])
-            add_log("WARNING", f"【库同步】TMDB 请求失败: {path} HTTP {res.status_code}")
-        except Exception as e:
-            add_log("WARNING", f"【库同步】TMDB 请求异常: {path} -> {str(e)}")
+        last_error = ""
+        for attempt in range(1, 4):
+            try:
+                res = await client.get(f"{base_url}{path}", params=params)
+                if res.status_code == 200:
+                    return res.json().get('results', [])
+                body = (res.text or "").strip().replace("\n", " ")[:160]
+                last_error = f"HTTP {res.status_code}" + (f" - {body}" if body else "")
+                if res.status_code not in (429, 500, 502, 503, 504):
+                    break
+            except httpx.TimeoutException as e:
+                last_error = f"{e.__class__.__name__}: 请求超时"
+            except httpx.RequestError as e:
+                last_error = f"{e.__class__.__name__}: {e}"
+            except Exception as e:
+                last_error = f"{e.__class__.__name__}: {e or repr(e)}"
+
+            await asyncio.sleep(min(2.0, 0.35 * attempt))
+
+        add_log("WARNING", f"【库同步】TMDB 请求失败: {path} page={params.get('page')} -> {last_error or '未知错误'}")
         return []
 
     async def sync_trending(client):
@@ -321,7 +334,9 @@ async def sync_tmdb_data(force=False, mode="all"):
             return total_rows
 
     try:
-        async with httpx.AsyncClient(timeout=30.0) as client:
+        timeout = httpx.Timeout(30.0, connect=10.0)
+        headers = {"User-Agent": "CineLink/2.2 (+https://github.com/ttt7788/CineLink)"}
+        async with httpx.AsyncClient(timeout=timeout, headers=headers) as client:
             trending_rows = []
             if mode in ["all", "trending"]:
                 trending_rows = await sync_trending(client)
