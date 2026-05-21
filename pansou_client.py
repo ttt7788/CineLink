@@ -1,4 +1,5 @@
 import os
+import json
 from typing import Any
 
 import httpx
@@ -79,6 +80,19 @@ def normalize_pansou_response(raw: Any) -> dict[str, Any]:
     }
 
 
+def _format_request_error(exc: Exception) -> str:
+    if isinstance(exc, httpx.TimeoutException):
+        return f"{exc.__class__.__name__}: 请求超时"
+    if isinstance(exc, httpx.ConnectError):
+        return f"{exc.__class__.__name__}: 无法连接"
+    if isinstance(exc, httpx.HTTPStatusError):
+        body = (exc.response.text or "").strip().replace("\n", " ")[:160]
+        return f"HTTP {exc.response.status_code}" + (f" - {body}" if body else "")
+    if isinstance(exc, json.JSONDecodeError):
+        return "JSONDecodeError: 接口返回不是 JSON"
+    return f"{exc.__class__.__name__}: {exc or repr(exc)}"
+
+
 async def search_pansou(
     keyword: str,
     config: dict[str, Any] | None = None,
@@ -92,17 +106,14 @@ async def search_pansou(
         return {"ok": False, "message": "未配置盘搜 API 接口地址", "source": "", "total": 0, "merged_by_type": {}}
 
     close_client = client is None
-    active_client = client or httpx.AsyncClient(timeout=30.0)
+    active_client = client or httpx.AsyncClient(timeout=httpx.Timeout(60.0, connect=8.0))
+    compatible_payload = {"keyword": kw, "res": "merge", "src": "all"}
     official_payload = {"kw": kw, "res": "merge", "src": "all"}
     attempts = [
+        ("POST", "/api/search", {"json": compatible_payload}),
         ("POST", "/api/search", {"json": official_payload}),
+        ("GET", "/api/search", {"params": compatible_payload}),
         ("GET", "/api/search", {"params": official_payload}),
-        ("POST", "/api/search", {"json": {"keyword": kw, "res": "merge", "src": "all"}}),
-        ("GET", "/api/search", {"params": {"keyword": kw, "res": "merge", "src": "all"}}),
-        ("POST", "/api/search", {"json": {"q": kw, "res": "merge", "src": "all"}}),
-        ("GET", "/api/search", {"params": {"q": kw, "res": "merge", "src": "all"}}),
-        ("POST", "/api/search", {"json": {"wd": kw, "res": "merge", "src": "all"}}),
-        ("GET", "/api/search", {"params": {"wd": kw, "res": "merge", "src": "all"}}),
     ]
     best_result: dict[str, Any] | None = None
     errors: list[str] = []
@@ -132,7 +143,7 @@ async def search_pansou(
                 if best_result is None:
                     best_result = current
             except Exception as exc:
-                errors.append(f"{method} {path}: {exc}")
+                errors.append(f"{method} {path}: {_format_request_error(exc)}")
 
         if best_result is not None:
             return best_result
