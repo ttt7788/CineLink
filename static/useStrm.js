@@ -2,6 +2,7 @@ const useStrm = (API_BASE, ElMessage, msgBox, options = {}) => {
     const { ref } = Vue;
 
     const strmConfigs = ref([]);
+    const strmRuntime = ref({});
     const showStrmDialog = ref(false);
     const isEditingConfig = ref(false);
     const editingConfigId = ref(null);
@@ -30,7 +31,8 @@ const useStrm = (API_BASE, ElMessage, msgBox, options = {}) => {
         return options.requireDriveReady(drive, feature);
     };
 
-    const loadStrmConfigs = async () => { const r = await axios.get(`${API_BASE}/strm/configs`); strmConfigs.value = r.data; };
+    const loadStrmRuntime = async () => { const r = await axios.get(`${API_BASE}/strm/runtime`); strmRuntime.value = r.data || {}; };
+    const loadStrmConfigs = async () => { const r = await axios.get(`${API_BASE}/strm/configs`); strmConfigs.value = r.data; await loadStrmRuntime(); };
     const loadStrmSettings = async () => { const r = await axios.get(`${API_BASE}/strm/settings`); strmSettings.value = r.data; };
     const loadStrmTasks = async () => { const r = await axios.get(`${API_BASE}/strm/tasks`); strmTasks.value = r.data; };
     const getStrmConfigName = (id) => { const c = strmConfigs.value.find(x => x.id === id); return c ? c.config_name : '未知节点'; };
@@ -83,9 +85,44 @@ const useStrm = (API_BASE, ElMessage, msgBox, options = {}) => {
         if (cfg && !requireInternalSourceReady(cfg.source_type, 'STRM 生成')) return;
         try {
             await axios.post(`${API_BASE}/strm/run/${id}`);
+            await loadStrmRuntime();
+            setTimeout(loadStrmRuntime, 800);
             ElMessage.success('生成任务已投递至后台，请查看日志！');
         } catch (e) {
             ElMessage.error(e.response?.data?.detail || 'STRM 任务启动失败');
+        }
+    };
+
+    const getStrmRuntime = (id) => strmRuntime.value[String(id)] || { state: 'idle', message: '', pid: null };
+    const getStrmRuntimeType = (id) => ({
+        running: 'success',
+        paused: 'warning',
+        stopped: 'danger',
+        failed: 'danger',
+        completed: 'info',
+        idle: 'info',
+    }[getStrmRuntime(id).state || 'idle'] || 'info');
+    const getStrmRuntimeText = (id) => ({
+        running: '运行中',
+        paused: '已暂停',
+        stopped: '已结束',
+        completed: '已完成',
+        failed: '异常',
+        idle: '空闲',
+    }[getStrmRuntime(id).state || 'idle'] || '空闲');
+    const isStrmTaskActive = (id) => ['running', 'paused'].includes(getStrmRuntime(id).state);
+    const controlStrmTask = async (id, action) => {
+        const labels = { pause: '暂停', resume: '继续', stop: '结束' };
+        try {
+            if (action === 'stop') {
+                await msgBox.confirm('确定结束当前 STRM 生成任务？已写入的 STRM 会保留，未处理的文件会停止。', '结束任务', { type: 'warning' });
+            }
+            await axios.post(`${API_BASE}/strm/control/${id}/${action}`);
+            await loadStrmRuntime();
+            ElMessage.success(`STRM 任务已${labels[action] || '更新'}`);
+        } catch (e) {
+            if (e === 'cancel' || e === 'close') return;
+            ElMessage.error(e.response?.data?.detail || 'STRM 控制失败');
         }
     };
 
@@ -132,11 +169,11 @@ const useStrm = (API_BASE, ElMessage, msgBox, options = {}) => {
     const runReplaceDomain = async () => { if (!replaceTool.value.target_directory || !replaceTool.value.old_domain || !replaceTool.value.new_domain) return ElMessage.warning('参数不全'); try { await axios.post(`${API_BASE}/strm/replace_domain`, replaceTool.value); ElMessage.success('后台替换中！'); } catch (e) {} };
 
     return {
-        strmConfigs, showStrmDialog, isEditingConfig, newStrmConfig,
+        strmConfigs, strmRuntime, showStrmDialog, isEditingConfig, newStrmConfig,
         strmRecords, recordTotal, recordPage, recordPageSize, recordSummaries, activeRecordConfigId,
         strmTasks, showTaskDialog, newStrmTask, isEditingTask,
         strmSettings, replaceTool,
-        loadStrmConfigs, openStrmDialog, editStrmConfig, saveStrmConfig, deleteStrmConfig, runStrmTask, applyStrmSourceType, formatStrmSourceType,
+        loadStrmConfigs, loadStrmRuntime, openStrmDialog, editStrmConfig, saveStrmConfig, deleteStrmConfig, runStrmTask, controlStrmTask, getStrmRuntime, getStrmRuntimeType, getStrmRuntimeText, isStrmTaskActive, applyStrmSourceType, formatStrmSourceType,
         loadStrmRecords, clearStrmRecords, handleRecordTabChange, getRecordSummaryCount,
         loadStrmTasks, openTaskDialog, editStrmTask, saveStrmTask, toggleTaskStatus, deleteStrmTask, getStrmConfigName,
         loadStrmSettings, saveStrmSettings, runReplaceDomain

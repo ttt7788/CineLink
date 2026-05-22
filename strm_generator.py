@@ -15,6 +15,7 @@ from database import get_db
 from logger import add_log
 from alist_integration import ALIST_BASE_URL, get_alist_admin_token
 from internal_drives import INTERNAL_DRIVE_PROVIDERS
+from strm_control import StrmControlStopped, check_strm_control, finish_strm_job, start_strm_job
 
 INTERNAL_SOURCE_TYPES = {'115_internal', 'aliyun_internal', 'quark_internal', '123_internal'}
 INTERNAL_PLAY_PUBLIC_URL = os.environ.get("CINELINK_PLAY_PUBLIC_URL", "http://127.0.0.1:8000").rstrip("/")
@@ -271,8 +272,10 @@ def scan_alist_directories_concurrently(config, script_config, existing_records)
             future_dirs[future] = root_dir
 
         while futures:
+            check_strm_control(config['id'], "AList 目录扫描")
             done, futures = concurrent.futures.wait(futures, return_when=concurrent.futures.FIRST_COMPLETED)
             for future in done:
+                check_strm_control(config['id'], "AList 目录扫描")
                 current_dir = future_dirs.pop(future, root_dir)
                 result = future.result()
                 with counter_lock:
@@ -289,6 +292,7 @@ def scan_alist_directories_concurrently(config, script_config, existing_records)
                     continue
 
                 for item in result:
+                    check_strm_control(config['id'], "AList 文件比对")
                     name = item.get("name") or ""
                     if not name:
                         continue
@@ -463,8 +467,10 @@ def scan_internal_directories_by_id(config, script_config, existing_records):
         future_dirs[next(iter(futures))] = ("", root_id)
 
         while futures:
+            check_strm_control(config['id'], "指定目录扫描")
             done, futures = concurrent.futures.wait(futures, return_when=concurrent.futures.FIRST_COMPLETED)
             for future in done:
+                check_strm_control(config['id'], "指定目录扫描")
                 rel_dir, current_id = future_dirs.pop(future, ("", root_id))
                 try:
                     result = future.result() or []
@@ -485,6 +491,7 @@ def scan_internal_directories_by_id(config, script_config, existing_records):
                     continue
 
                 for item in result:
+                    check_strm_control(config['id'], "指定目录文件比对")
                     name = internal_item_name(provider, item)
                     if not name:
                         continue
@@ -560,8 +567,10 @@ def record_success(config_id, file_name, local_path):
 
 def fetch_dir_task(directory, config):
     try:
+        check_strm_control(config['id'], "WebDAV 目录读取")
         min_sec, max_sec = config['interval']
         time.sleep(random.uniform(min_sec, max_sec))
+        check_strm_control(config['id'], "WebDAV 目录读取")
         
         client = get_webdav_client(config)
         safe_dir = directory if directory.endswith('/') else directory + '/'
@@ -601,8 +610,10 @@ def scan_directories_concurrently(config, script_config, existing_records):
         futures.add(executor.submit(fetch_dir_task, root_dir, config))
         
         while futures:
+            check_strm_control(config['id'], "WebDAV 目录扫描")
             done, futures = concurrent.futures.wait(futures, return_when=concurrent.futures.FIRST_COMPLETED)
             for future in done:
+                check_strm_control(config['id'], "WebDAV 目录扫描")
                 current_dir, result = future.result()
                 
                 with counter_lock:
@@ -623,6 +634,7 @@ def scan_directories_concurrently(config, script_config, existing_records):
                     continue
 
                 for f in result:
+                    check_strm_control(config['id'], "WebDAV 文件比对")
                     is_directory = f.name.endswith('/')
                     if is_directory:
                         if f.name != current_dir and f.name not in visited:
@@ -662,10 +674,12 @@ def scan_directories_concurrently(config, script_config, existing_records):
 
 def create_strm_file(file_name, file_size, config, local_directory, relative_path, strm_file_name, size_threshold):
     global strm_file_counter
+    check_strm_control(config['id'], "STRM 文件写入")
     if file_size < size_threshold * (1024 * 1024): return
 
     min_sec, max_sec = config['interval']
     time.sleep(random.uniform(min_sec, max_sec))
+    check_strm_control(config['id'], "STRM 文件写入")
 
     if str(file_name).startswith("internal-id://"):
         drive_name, play_id, display_name = parse_internal_id_ref(file_name)
@@ -712,6 +726,7 @@ def create_strm_file(file_name, file_size, config, local_directory, relative_pat
 # 【新增】真实下载元数据文件的核心函数
 def download_metadata_file(remote_file_name, config, local_directory, relative_path, local_file_name):
     global metadata_file_counter
+    check_strm_control(config['id'], "元数据下载")
     local_file_path = os.path.join(local_directory, local_file_name)
     
     # 二次防错：如果本地正好存在，跳过不下载
@@ -721,6 +736,7 @@ def download_metadata_file(remote_file_name, config, local_directory, relative_p
 
     min_sec, max_sec = config['interval']
     time.sleep(random.uniform(min_sec, max_sec))
+    check_strm_control(config['id'], "元数据下载")
 
     try:
         if str(remote_file_name).startswith("internal-id://"):
@@ -732,6 +748,7 @@ def download_metadata_file(remote_file_name, config, local_directory, relative_p
                 res.raise_for_status()
                 with open(local_fs_path(local_file_path), "wb") as fh:
                     for chunk in res.iter_content(chunk_size=1024 * 1024):
+                        check_strm_control(config['id'], "元数据下载")
                         if chunk:
                             fh.write(chunk)
         elif config.get('source_type') in INTERNAL_SOURCE_TYPES:
@@ -746,6 +763,7 @@ def download_metadata_file(remote_file_name, config, local_directory, relative_p
                 res.raise_for_status()
                 with open(local_fs_path(local_file_path), "wb") as fh:
                     for chunk in res.iter_content(chunk_size=1024 * 1024):
+                        check_strm_control(config['id'], "元数据下载")
                         if chunk:
                             fh.write(chunk)
         else:
@@ -768,7 +786,7 @@ def download_metadata_file(remote_file_name, config, local_directory, relative_p
     except Exception as e:
         add_log("ERROR", f"❌ 下载元数据文件失败: [{local_file_name}] -> 原因: {str(e)}")
 
-def main(config_id):
+def run_generation_body(config_id):
     global strm_file_counter, metadata_file_counter, video_file_counter, existing_strm_file_counter, strm_tasks, metadata_tasks, dir_scan_counter
     config = get_webdav_config(config_id)
     if not config:
@@ -804,15 +822,32 @@ def main(config_id):
         futures = []
         # 1. 提交 STRM 写入任务
         for t in strm_tasks:
+            check_strm_control(config['id'], "提交 STRM 写入任务")
             futures.append(executor.submit(create_strm_file, t[0], t[1], config, t[2], t[3], t[4], script_config['size_threshold']))
         # 2. 提交 元数据 下载任务
         for m in metadata_tasks:
+            check_strm_control(config['id'], "提交元数据下载任务")
             futures.append(executor.submit(download_metadata_file, m[0], config, m[1], m[2], m[3]))
             
         for future in as_completed(futures):
-            pass
+            check_strm_control(config['id'], "等待 STRM 写入完成")
+            future.result()
 
     add_log("SUCCESS", f"🎉 STRM 作业圆满完成！本次新增映射 {strm_file_counter} 个视频，真实下载了 {metadata_file_counter} 个字幕/元数据，并已安全更新至缓存。")
+
+def main(config_id):
+    start_strm_job(config_id, os.getpid())
+    try:
+        run_generation_body(config_id)
+        finish_strm_job(config_id, "completed", "STRM 生成任务已完成")
+    except StrmControlStopped as exc:
+        add_log("WARNING", f"STRM 生成任务已结束，节点 ID: {config_id}，原因: {exc}", module="strm")
+        finish_strm_job(config_id, "stopped", str(exc))
+    except Exception as exc:
+        add_log("ERROR", f"STRM 生成任务异常退出，节点 ID: {config_id}，原因: {exc}", module="strm")
+        finish_strm_job(config_id, "failed", str(exc))
+        raise
+
 
 if __name__ == '__main__':
     main(int(sys.argv[1]) if len(sys.argv) > 1 else 1)

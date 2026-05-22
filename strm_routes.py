@@ -6,6 +6,7 @@ from config_guard import require_drive_ready
 from database import get_db, get_sys_config
 from models import StrmConfigModel, StrmSettingsModel, ReplaceDomainModel, StrmTaskModel
 from logger import add_log
+from strm_control import read_strm_state, request_strm_action, start_strm_job
 
 # 就是这一行缺失或未保存导致了报错
 strm_router = APIRouter()
@@ -147,6 +148,9 @@ def update_strm_settings(settings: StrmSettingsModel):
 
 @strm_router.post("/api/strm/run/{config_id}")
 def run_strm_generator(config_id: int, background_tasks: BackgroundTasks):
+    runtime = read_strm_state(config_id)
+    if runtime.get("state") in ("running", "paused"):
+        raise HTTPException(status_code=409, detail="该 STRM 节点已有生成任务正在运行，请先暂停、继续或结束当前任务。")
     conn = get_db()
     row = conn.execute("SELECT source_type, config_name FROM strm_configs WHERE id=?", (config_id,)).fetchone()
     conn.close()
@@ -158,9 +162,26 @@ def run_strm_generator(config_id: int, background_tasks: BackgroundTasks):
     script_path = os.path.join(os.path.dirname(__file__), 'strm_generator.py')
     def run_script():
         add_log("INFO", f"🚀 正在拉起 STRM 矩阵生成作业 (关联节点ID: {config_id})...")
-        subprocess.Popen([sys.executable, script_path, str(config_id)])
+        proc = subprocess.Popen([sys.executable, script_path, str(config_id)])
+        start_strm_job(config_id, proc.pid)
     background_tasks.add_task(run_script)
     return {"message": "STRM 生成任务已在后台多线程启动，请查看日志。"}
+
+@strm_router.get("/api/strm/runtime")
+def get_strm_runtime():
+    conn = get_db()
+    rows = conn.execute("SELECT id FROM strm_configs").fetchall()
+    conn.close()
+    return {str(row["id"]): read_strm_state(row["id"]) for row in rows}
+
+
+@strm_router.post("/api/strm/control/{config_id}/{action}")
+def control_strm_runtime(config_id: int, action: str):
+    try:
+        return request_strm_action(config_id, action)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
 
 @strm_router.post("/api/strm/replace_domain")
 def replace_domain(req: ReplaceDomainModel, background_tasks: BackgroundTasks):

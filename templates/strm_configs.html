@@ -29,6 +29,11 @@
             <template #default="s">{{ s.row.root_id || '默认根目录' }}</template>
         </el-table-column>
         <el-table-column prop="target_directory" label="STRM 输出目录" min-width="220"></el-table-column>
+        <el-table-column label="任务状态" width="120">
+            <template #default="s">
+                <el-tag :type="getStrmRuntimeType(s.row.id)" size="small">{{ getStrmRuntimeText(s.row.id) }}</el-tag>
+            </template>
+        </el-table-column>
         <el-table-column label="更新模式" width="110">
             <template #default="s">
                 <el-tag :type="s.row.update_mode === 'incremental' ? 'success' : 'warning'">
@@ -36,9 +41,12 @@
                 </el-tag>
             </template>
         </el-table-column>
-        <el-table-column label="操作" width="220">
+        <el-table-column label="操作" width="360">
             <template #default="s">
-                <el-button type="success" size="small" @click="runStrmTask(s.row.id)">生成</el-button>
+                <el-button type="success" size="small" :disabled="isStrmTaskActive(s.row.id)" @click="runStrmTask(s.row.id)">生成</el-button>
+                <el-button v-if="getStrmRuntime(s.row.id).state === 'running'" type="warning" size="small" plain @click="controlStrmTask(s.row.id, 'pause')">暂停</el-button>
+                <el-button v-if="getStrmRuntime(s.row.id).state === 'paused'" type="success" size="small" plain @click="controlStrmTask(s.row.id, 'resume')">继续</el-button>
+                <el-button v-if="isStrmTaskActive(s.row.id)" type="danger" size="small" plain @click="controlStrmTask(s.row.id, 'stop')">结束</el-button>
                 <el-button type="primary" size="small" @click="editStrmConfig(s.row)">编辑</el-button>
                 <el-button type="danger" size="small" @click="deleteStrmConfig(s.row.id)">删除</el-button>
             </template>
