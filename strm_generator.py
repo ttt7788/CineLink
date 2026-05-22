@@ -37,6 +37,8 @@ db_lock = threading.Lock()
 thread_local = threading.local()
 alist_dir_cache = {}
 alist_cache_lock = threading.Lock()
+internal_id_path_cache = {}
+internal_id_path_lock = threading.Lock()
 
 def get_webdav_config(config_id):
     conn = get_db()
@@ -330,6 +332,10 @@ def internal_root_is_default(drive, root_id):
     return root_id == ("root" if drive == "aliyun" else "0")
 
 
+def internal_default_root_id(drive):
+    return "root" if drive == "aliyun" else "0"
+
+
 def internal_item_name(provider, item):
     return provider.get_name(item, "") or item.get("name") or item.get("file_name") or item.get("filename") or ""
 
@@ -355,6 +361,47 @@ def internal_item_folder_id(drive, item):
         return item.get("cid")
     if drive == "123":
         return item.get("fileId")
+    return ""
+
+
+def find_internal_folder_path(provider, drive, target_id, max_dirs=2000):
+    target_id = str(target_id or "").strip()
+    if internal_root_is_default(drive, target_id):
+        return f"/{drive}"
+    cache_key = (drive, target_id)
+    with internal_id_path_lock:
+        if cache_key in internal_id_path_cache:
+            return internal_id_path_cache[cache_key]
+
+    root_id = internal_default_root_id(drive)
+    queue = [(root_id, f"/{drive}")]
+    visited = {root_id}
+    scanned = 0
+    while queue and scanned < max_dirs:
+        current_id, current_path = queue.pop(0)
+        scanned += 1
+        try:
+            items = provider.list_children(current_id) or []
+        except Exception as exc:
+            add_log("WARNING", f"STRM ID path lookup failed at {drive}:{current_id} -> {exc}", module="strm")
+            continue
+
+        for item in items:
+            if not internal_item_is_folder(drive, item):
+                continue
+            folder_id = str(internal_item_folder_id(drive, item) or "")
+            if not folder_id or folder_id in visited:
+                continue
+            folder_name = internal_item_name(provider, item)
+            folder_path = posixpath.join(current_path.rstrip("/"), folder_name)
+            if folder_id == target_id:
+                with internal_id_path_lock:
+                    internal_id_path_cache[cache_key] = folder_path
+                return folder_path
+            visited.add(folder_id)
+            queue.append((folder_id, folder_path))
+
+    add_log("WARNING", f"STRM could not map {drive} directory ID to AList path: {target_id}", module="strm")
     return ""
 
 
@@ -385,7 +432,7 @@ def scan_internal_directories_by_id(config, script_config, existing_records):
     drive = INTERNAL_SOURCE_DRIVE.get(config.get("source_type"), "")
     provider = INTERNAL_DRIVE_PROVIDERS.get(drive)
     root_id = str(config.get("root_id") or "").strip()
-    if INTERNAL_STRM_BACKEND == "alist" or not provider or internal_root_is_default(drive, root_id):
+    if not provider or internal_root_is_default(drive, root_id):
         scan_alist_directories_concurrently(config, script_config, existing_records)
         return
 
@@ -398,6 +445,14 @@ def scan_internal_directories_by_id(config, script_config, existing_records):
 
     meta_formats = script_config['subtitle_formats'] + script_config['image_formats'] + script_config['metadata_formats']
     add_log("INFO", f"🎯 STRM 内置节点 [{config['config_name']}] 使用指定目录 ID 扫描: {drive}:{root_id}")
+
+    alist_root_path = ""
+    if INTERNAL_STRM_BACKEND == "alist":
+        alist_root_path = find_internal_folder_path(provider, drive, root_id)
+        if alist_root_path:
+            add_log("INFO", f"STRM will scan directory ID {drive}:{root_id} and write AList paths under {alist_root_path}", module="strm")
+        else:
+            add_log("WARNING", f"STRM directory ID {drive}:{root_id} is active, but AList path was not found. Playback will fallback to ID proxy for this node.", module="strm")
 
     max_workers = script_config.get('download_threads', 4) * 2
     futures = set()
@@ -447,7 +502,10 @@ def scan_internal_directories_by_id(config, script_config, existing_records):
                     play_id = internal_item_play_id(drive, item)
                     if not play_id:
                         continue
-                    remote_ref = make_internal_id_ref(drive, play_id, name)
+                    if INTERNAL_STRM_BACKEND == "alist" and alist_root_path:
+                        remote_ref = posixpath.join(alist_root_path.rstrip("/"), rel_dir, name)
+                    else:
+                        remote_ref = make_internal_id_ref(drive, play_id, name)
                     if file_extension in script_config['video_formats']:
                         with counter_lock:
                             video_file_counter += 1
