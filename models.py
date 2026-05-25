@@ -23,6 +23,8 @@ class ConfigModel(BaseModel):
     auto_subscribe_drive: Optional[str] = "115"  # 【新增】自动订阅的目标网盘
     magnet_download_drive: Optional[str] = "115"
     ed2k_download_drive: Optional[str] = "115"
+    pipeline_auto_organize: Optional[str] = "0"
+    pipeline_organize_max_items: Optional[Union[str, int]] = "30"
 
 class SubscribeModel(BaseModel):
     tmdb_id: int
@@ -38,6 +40,13 @@ class BatchSubscribeModel(BaseModel):
 
 class BatchDeleteModel(BaseModel):
     tmdb_ids: List[int]
+
+class ManualSeriesBindModel(BaseModel):
+    tmdb_id: int
+    title: Optional[str] = ""
+    drive_type: str
+    cloud_parent_id: str
+    cloud_path: Optional[str] = ""
 
 class SaveLinkModel(BaseModel):
     tmdb_id: int

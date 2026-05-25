@@ -9,6 +9,7 @@ from drive_api import Drive115
 from logger import add_log
 from pansou_client import search_pansou
 from series_bindings import bind_series_after_transfer, ensure_series_target_folder, refresh_series_bindings
+from drive_organizer import maybe_run_post_transfer_organize
 
 QUALITY_MAP = {"4k": 100, "2160p": 100, "uhd": 100, "1080p": 80, "fhd": 80, "bdrip": 75, "720p": 60, "remux": 95}
 
@@ -17,7 +18,10 @@ VALID_VIDEO_EXTS = (
     '.rmvb', '.iso', '.vob', '.webm', '.srt', '.ass', '.sub', '.nfo'
 )
 
-TMDB_TRENDING_PAGES = 10
+TMDB_TRENDING_PAGES = 1
+TMDB_TRENDING_PAGE_SIZE = 20
+TMDB_TRENDING_EXPECTED_MAX = TMDB_TRENDING_PAGES * TMDB_TRENDING_PAGE_SIZE * 2
+TMDB_TRENDING_VERSION = f"day-pages-{TMDB_TRENDING_PAGES}"
 TMDB_BASE_PAGES = 500
 TMDB_BATCH_SIZE = 20
 TMDB_CONCURRENCY = 8
@@ -88,6 +92,42 @@ def _upsert_media_items(items, today_str, is_trending=False):
                 WHEN excluded.is_trending = 1 THEN excluded.trend_date
                 ELSE media_items.trend_date
             END,
+            popularity=excluded.popularity,
+            vote_average=excluded.vote_average
+    ''', rows)
+    conn.commit()
+    conn.close()
+    return rows
+
+def _replace_daily_trending_items(items, today_str):
+    rows = []
+    seen_ids = set()
+    for item in items:
+        row = _media_tuple(item, today_str, is_trending=True)
+        if not row or row[0] in seen_ids:
+            continue
+        seen_ids.add(row[0])
+        rows.append(row)
+
+    if not rows:
+        return []
+
+    conn = get_db()
+    cursor = conn.cursor()
+    cursor.execute("UPDATE media_items SET is_trending = 0, trend_date = NULL WHERE is_trending = 1 OR trend_date IS NOT NULL")
+    cursor.executemany('''
+        INSERT INTO media_items
+            (tmdb_id, media_type, title, overview, poster_path, add_date,
+             is_trending, trend_date, popularity, vote_average)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(tmdb_id) DO UPDATE SET
+            media_type=excluded.media_type,
+            title=excluded.title,
+            overview=excluded.overview,
+            poster_path=excluded.poster_path,
+            add_date=excluded.add_date,
+            is_trending=1,
+            trend_date=excluded.trend_date,
             popularity=excluded.popularity,
             vote_average=excluded.vote_average
     ''', rows)
@@ -267,11 +307,15 @@ async def sync_tmdb_data(force=False, mode="all"):
 
         async with lock:
             fresh_config = get_sys_config()
-            if not force and fresh_config.get('last_trending_sync_date') == today_str:
+            if (
+                not force
+                and fresh_config.get('last_trending_sync_date') == today_str
+                and fresh_config.get('last_trending_sync_version') == TMDB_TRENDING_VERSION
+            ):
                 add_log("INFO", "【今日热门】今日已采集完成，跳过重复请求。")
                 return []
 
-            add_log("INFO", f"【今日热门】开始采集电影/剧集日趋势，各 {TMDB_TRENDING_PAGES} 页...")
+            add_log("INFO", "【今日热门】开始采集当天电影/剧集日趋势快照，各取首页热门。")
             tasks = []
             for m_type in ['movie', 'tv']:
                 for page_no in range(1, TMDB_TRENDING_PAGES + 1):
@@ -289,9 +333,12 @@ async def sync_tmdb_data(force=False, mode="all"):
                     item['media_type'] = m_type
                     items.append(item)
 
-            rows = _upsert_media_items(items, today_str, is_trending=True)
-            _set_config_values({"last_trending_sync_date": today_str})
-            add_log("SUCCESS", f"【今日热门】采集完成，新增/更新 {len(rows)} 条热门影视。")
+            rows = _replace_daily_trending_items(items, today_str)
+            _set_config_values({
+                "last_trending_sync_date": today_str,
+                "last_trending_sync_version": TMDB_TRENDING_VERSION,
+            })
+            add_log("SUCCESS", f"【今日热门】采集完成，已替换为 {today_str} 当天热门快照，共 {len(rows)} 条。")
             return rows
 
     async def sync_media_type(client, m_type):
@@ -546,6 +593,8 @@ async def _auto_subscription_task_impl():
                             parent_id,
                             target_cloud_path or None,
                         )
+                        if msg != "网盘已有极佳版本":
+                            await maybe_run_post_transfer_organize(drive_type, parent_id, title, media_type, config)
                     else:
                         add_log("ERROR", f"【失败】《{title}》{len(candidates)} 条候选资源全部尝试失败，最后错误: {msg}")
                 else:

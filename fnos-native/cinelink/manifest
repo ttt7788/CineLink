@@ -1,7 +1,7 @@
 appname=cinelinknative
 version=2.2.0
 display_name=CineLink 云幕智链 原生版
-desc=CineLink 原生版不依赖 Docker 运行，内置 Linux Python 运行时、AList 与项目依赖，支持影视资源管理、聚合搜索、网盘转存、剧集追更、网盘文件管理和 STRM 生成播放。
+desc=CineLink 原生版不依赖 Docker，内置 Linux Python 运行时、AList 与项目依赖，支持影视资源管理、聚合搜索、网盘转存、剧集追更、资源整理、STRM 生成和播放代理。
 platform=all
 source=thirdparty
 
@@ -19,4 +19,4 @@ desktop_applaunchname=cinelinknative.main
 service_port=8000
 checkport=true
 
-changelog=2.2.0：新增飞牛原生 FPK 打包工程，内置 Python 运行时、依赖与 AList，无需 Docker 运行；飞牛原生版 STRM 默认通过内置 AList 生成 302 播放地址。
+changelog=2.2.0：完善飞牛原生运行环境，支持内置 AList、网盘挂载、STRM 生成、播放代理、剧集追更和资源整理。

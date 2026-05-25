@@ -273,6 +273,7 @@ class Drive115:
         items = []
         offset = 0
         limit = 1200
+        last_error = ""
         try:
             client = self._client()
             while True:
@@ -283,14 +284,50 @@ class Drive115:
                     "show_dir": 1,
                 })
                 if data.get("state") is False:
-                    return [], data.get("error") or data.get("msg") or "115 目录读取失败"
+                    last_error = data.get("error") or data.get("msg") or "115 目录读取失败"
+                    break
                 page_items = data.get("data") or []
                 items.extend(page_items)
                 if len(page_items) < limit:
                     break
                 offset += limit
         except Exception as e:
-            return [], str(e)
+            last_error = str(e)
+        if items:
+            return items, "success"
+
+        # p115client 的 aps/natsort 接口偶尔会被 115 拦截为 405。
+        # 使用 webapi/files 作为兜底，避免剧集追更因单一接口不可用持续刷 ERROR。
+        items = []
+        offset = 0
+        try:
+            async with httpx.AsyncClient(timeout=self.timeout) as client:
+                while True:
+                    res = await client.get(
+                        "https://webapi.115.com/files",
+                        params={
+                            "aid": 1,
+                            "cid": cid or "0",
+                            "offset": offset,
+                            "limit": limit,
+                            "show_dir": 1,
+                            "count_folders": 1,
+                            "o": "user_utime",
+                            "asc": 0,
+                        },
+                        headers=self.headers,
+                    )
+                    data = _safe_json(res)
+                    if res.status_code >= 400 or data.get("state") is False:
+                        msg = data.get("error") or data.get("msg") or data.get("message") or res.text[:160] or last_error
+                        return [], f"115 目录读取失败: HTTP {res.status_code} {msg}".strip()
+                    page_items = data.get("data") or []
+                    items.extend(page_items)
+                    if len(page_items) < limit:
+                        break
+                    offset += limit
+        except Exception as e:
+            return [], last_error or str(e)
         return items, "success"
 
     async def get_download_url(self, pickcode: str):
@@ -457,10 +494,54 @@ class Drive115:
             return False, str(e)
 
     async def rename(self, file_id: str, new_name: str):
-        return False, "当前 115 Web Cookie 暂不支持重命名，请在 115 客户端操作"
+        if not self.cookie:
+            return False, "未配置 115 Cookie"
+        clean_name = (new_name or "").strip()
+        if not file_id or not clean_name:
+            return False, "115 重命名参数不完整"
+        client = self._client()
+        attempts = (
+            lambda: client.fs_rename_app((str(file_id), clean_name), app="android"),
+            lambda: client.fs_rename_app((str(file_id), clean_name), app="chrome"),
+            lambda: client.fs_rename((str(file_id), clean_name)),
+        )
+        last_msg = "115 重命名失败"
+        for call in attempts:
+            try:
+                ok, msg = self._format_result(call(), "115 重命名成功")
+                if ok:
+                    return True, msg
+                last_msg = msg
+            except Exception as e:
+                last_msg = str(e)
+        return False, last_msg
 
     async def delete(self, file_id: str):
         return False, "当前 115 Web Cookie 暂不支持删除，请在 115 客户端操作"
+
+    async def move(self, file_id: str, target_parent_id: str):
+        if not self.cookie:
+            return False, "未配置 115 Cookie"
+        clean_file_id = str(file_id or "").strip()
+        clean_parent_id = str(target_parent_id or "0").strip() or "0"
+        if not clean_file_id:
+            return False, "115 移动参数不完整"
+        client = self._client()
+        attempts = (
+            lambda: client.fs_move_app(clean_file_id, pid=clean_parent_id, app="android"),
+            lambda: client.fs_move_app(clean_file_id, pid=clean_parent_id, app="chrome"),
+            lambda: client.fs_move(clean_file_id, pid=clean_parent_id),
+        )
+        last_msg = "115 移动失败"
+        for call in attempts:
+            try:
+                ok, msg = self._format_result(call(), "115 移动成功")
+                if ok:
+                    return True, msg
+                last_msg = msg
+            except Exception as e:
+                last_msg = str(e)
+        return False, last_msg
 
 
 class AliyunDrive:

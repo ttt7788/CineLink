@@ -1,26 +1,32 @@
-# CineLink fnOS FPK packaging
+# CineLink 飞牛 Docker 版 FPK
 
-This directory contains the fnOS application package project for CineLink.
+该目录用于构建 CineLink 飞牛 Docker 应用包。安装后由飞牛应用包管理 Docker 编排，并使用已发布镜像运行 CineLink。
 
-Build:
-
-```bash
-fnpack build --directory fnos/cinelink
-```
-
-The package uses the published Docker image:
+默认镜像：
 
 ```text
 akjehsmhq5/cinelink:v2.2.0
 ```
 
-During installation, fnOS wizard fields can set:
+## 默认目录
 
-- `wizard_cinelink_config_dir`: mounted into `/app/data`
-- `wizard_cinelink_media_dir`: mounted into `/data/media`
-- `wizard_cinelink_web_port`: mapped to container port `8000`
-- `wizard_cinelink_play_public_url`: written to `CINELINK_PLAY_PUBLIC_URL`
+```text
+配置与数据库：飞牛应用配置目录 / cinelink_config
+STRM 输出：飞牛应用配置目录 / cinelink_media
+Web 端口：8000
+内置 AList 端口：5244
+```
 
-The wizard pre-fills `/vol1/@appdata/cinelink/config` and
-`/vol1/@appdata/cinelink/media`; users can replace them with another absolute
-Linux path during installation or configuration.
+安装时可在飞牛配置界面修改配置目录、STRM 输出目录、Web 端口和播放公开地址。
+
+## 构建
+
+```bash
+fnpack build --directory fnos/cinelink
+```
+
+## 版权声明
+
+Copyright (c) 2026 ttt7788.
+
+CineLink 云幕智链项目代码全程由 Codex 编写。第三方组件和外部服务遵循其各自许可协议、服务条款和版权声明。

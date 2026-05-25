@@ -2,19 +2,19 @@
     <section class="about-hero">
         <div>
             <div class="about-kicker">CineLink 云幕智链</div>
-            <h1>影视资源发现、转存、STRM 与播放的一体化中枢</h1>
-            <p>当前版本已切换为内置 AList 网盘层，直接服务夸克、阿里云盘、115 网盘的挂载浏览、STRM 生成与播放代理。</p>
+            <h1>影视资源发现、转存、整理、STRM 与播放的一体化中枢</h1>
+            <p>系统集成 TMDB 影视库、聚合搜索、四网盘授权、订阅搜刮、剧集追更、资源整理、内置 AList 和 STRM 播放代理，适合家庭影音库长期运行。</p>
             <div class="about-tags">
                 <el-tag type="success" effect="dark">内置 AList</el-tag>
-                <el-tag type="primary" effect="dark">三网盘接入</el-tag>
-                <el-tag type="warning" effect="dark">Docker Ready</el-tag>
-                <el-tag type="info" effect="dark">STRM 高速缓存</el-tag>
+                <el-tag type="primary" effect="dark">四网盘接入</el-tag>
+                <el-tag type="warning" effect="dark">Docker / fnOS</el-tag>
+                <el-tag type="info" effect="dark">STRM 播放代理</el-tag>
             </div>
         </div>
         <div class="about-version">
             <div class="version-label">Version</div>
-            <strong>2.0.15</strong>
-            <span>当前开发构建</span>
+            <strong>2.2.0</strong>
+            <span>稳定构建</span>
         </div>
     </section>
 
@@ -22,17 +22,17 @@
         <div class="section-head">
             <div>
                 <h3>网盘配置健康状态</h3>
-                <p>系统启动和功能执行前都会检查授权与默认保存目录，缺项网盘会保持可见但不会执行转存、文件浏览或 STRM 内置任务。</p>
+                <p>系统会在执行转存、文件浏览、资源整理和 STRM 任务前检查授权与默认目录，未配置完整的网盘不会参与自动任务。</p>
             </div>
         </div>
         <div class="drive-config-strip">
             <div v-for="item in driveConfigCards" :key="item.type" class="drive-config-card" :class="{ ready: item.ready, missing: !item.ready }">
                 <div class="drive-config-title">
                     <strong>{{ item.label }}</strong>
-                    <el-tag :type="item.ready ? 'success' : 'warning'" size="small">{{ item.ready ? '已放行' : '待配置' }}</el-tag>
+                    <el-tag :type="item.ready ? 'success' : 'warning'" size="small">{{ item.ready ? '可用' : '待配置' }}</el-tag>
                 </div>
-                <p>默认保存目录: {{ item.saveDir || '未配置' }}</p>
-                <span>{{ item.ready ? '相关功能可以执行' : '缺少 ' + item.missing.join('、') }}</span>
+                <p>默认保存目录：{{ item.saveDir || '未配置' }}</p>
+                <span>{{ item.ready ? '授权与默认目录均已就绪' : '缺少 ' + item.missing.join('、') }}</span>
             </div>
         </div>
     </section>
@@ -40,65 +40,74 @@
     <section class="about-grid">
         <article class="about-card">
             <el-icon><Search></Search></el-icon>
-            <h3>聚合搜索与热门推荐</h3>
-            <p>全网聚合搜索已升级为搜索工作台，支持快捷关键词、今日热门推荐、结果订阅与一键搜盘。</p>
+            <h3>发现与搜索</h3>
+            <p>采集今日热门、电影库和剧集库，结合盘搜接口快速查找资源，并在转存前进行链接有效性检测。</p>
         </article>
         <article class="about-card">
             <el-icon><Cloudy></Cloudy></el-icon>
-            <h3>三网盘转存与管理</h3>
-            <p>支持夸克、阿里云盘、115 网盘授权接入，转存、目录浏览、文件管理和保存路径配置统一在系统内完成。</p>
+            <h3>网盘转存与文件管理</h3>
+            <p>支持夸克、阿里云盘、115 网盘和 123 云盘授权接入，统一管理默认保存目录、文件浏览和基础操作。</p>
         </article>
         <article class="about-card">
-            <el-icon><Connection></Connection></el-icon>
-            <h3>内置 AList 网盘层</h3>
-            <p>内置 AList 负责网盘挂载、签名直链和高性能流式读取。旧的内置 WebDAV 服务已移除，代码路径更清爽。</p>
+            <el-icon><Refresh></Refresh></el-icon>
+            <h3>订阅搜刮与剧集追更</h3>
+            <p>订阅任务会按计划搜索资源并转存；剧集可绑定网盘目录，定时扫描新增集数并更新记录。</p>
         </article>
         <article class="about-card">
-            <el-icon><VideoPlay></VideoPlay></el-icon>
-            <h3>播放代理优化</h3>
-            <p>夸克播放优先走 AList 签名地址，阿里云盘支持预览转码入口，115 保持 Range 友好的直连代理。</p>
+            <el-icon><Operation></Operation></el-icon>
+            <h3>资源整理</h3>
+            <p>按分类策略、命名规则和洗版策略整理网盘资源，支持预览后执行，减少误移动风险。</p>
         </article>
         <article class="about-card">
             <el-icon><DocumentChecked></DocumentChecked></el-icon>
-            <h3>STRM 生成与记录缓存</h3>
-            <p>内置节点通过 AList API 扫描，不再依赖 8088 WebDAV。生成记录按节点拆分展示，支持增量扫描和域名替换。</p>
+            <h3>STRM 生成</h3>
+            <p>通过内置 AList 扫描网盘目录，增量生成 STRM、字幕和元数据记录，并支持域名批量修复。</p>
+        </article>
+        <article class="about-card">
+            <el-icon><VideoPlay></VideoPlay></el-icon>
+            <h3>播放代理</h3>
+            <p>播放器通过 CineLink 访问网盘媒体，系统转发 Range 请求并复用直链缓存，提升远程播放稳定性。</p>
+        </article>
+        <article class="about-card">
+            <el-icon><Delete></Delete></el-icon>
+            <h3>插件与回收站</h3>
+            <p>回收站插件支持按网盘读取与自动清空，未完成授权的网盘会自动跳过。</p>
         </article>
         <article class="about-card">
             <el-icon><Box></Box></el-icon>
-            <h3>容器化部署</h3>
-            <p>Docker 镜像自动安装 Linux 版 AList，默认暴露 8000 与 5244，数据目录可通过 volume 持久化。</p>
+            <h3>部署方式</h3>
+            <p>支持 Docker、飞牛 Docker 版和飞牛原生版。原生版内置 Python 运行时与 AList，不依赖 Docker 服务。</p>
         </article>
     </section>
 
     <section class="about-panel">
         <div class="section-head">
             <div>
-                <h3>当前架构说明</h3>
-                <p>系统内部已从“内置 WebDAV”切换为“内置 AList + 播放代理”。外部 WebDAV 仍可作为用户自定义来源保留。</p>
+                <h3>运行流程</h3>
+                <p>CineLink 将采集、订阅、搜索、转存、整理和 STRM 生成串联成一条可长期运行的媒体自动化链路。</p>
             </div>
         </div>
         <div class="about-flow">
-            <div><strong>资源发现</strong><span>TMDB 热门 / 聚合搜索</span></div>
-            <div><strong>资源入库</strong><span>订阅队列 / 一键转存</span></div>
-            <div><strong>网盘挂载</strong><span>内置 AList: /quark /aliyun /115</span></div>
-            <div><strong>本地媒体库</strong><span>STRM 输出给 Emby / Jellyfin / Plex</span></div>
+            <div><strong>采集</strong><span>今日热门 / 电影库 / 剧集库</span></div>
+            <div><strong>搜索</strong><span>聚合搜索 / 链接检测</span></div>
+            <div><strong>转存</strong><span>分享链接 / 磁力 / ED2K</span></div>
+            <div><strong>整理</strong><span>分类 / 重命名 / 洗版</span></div>
+            <div><strong>播放</strong><span>STRM / AList / 播放代理</span></div>
         </div>
     </section>
 
     <section class="about-panel">
         <div class="section-head">
             <div>
-                <h3>最近更新</h3>
-                <p>这些是当前本地版本已经完成的重点变化。</p>
+                <h3>版权声明</h3>
+                <p>请在合法授权范围内使用本系统管理个人媒体库和网盘资源。</p>
             </div>
         </div>
-        <ul class="about-changelog">
-            <li><strong>移除内置 WebDAV：</strong>删除旧服务代码与 wsgidav 依赖，内部节点统一使用 AList。</li>
-            <li><strong>夸克播放修复：</strong>STRM 改用 `/play/quark_preview`，最终跳转到 AList 签名播放地址。</li>
-            <li><strong>阿里云盘增强：</strong>支持移动端 Refresh Token 扫码获取、转存与预览播放入口。</li>
-            <li><strong>115 网盘接入：</strong>支持扫码授权、内置挂载、STRM 生成与只读文件管理。</li>
-            <li><strong>Docker 适配：</strong>镜像内自动下载 AList Linux 二进制，Compose 配置已清理 8088 端口。</li>
-            <li><strong>界面优化：</strong>菜单图标补齐，全网聚合搜索升级为带热门推荐的工作台页面。</li>
-        </ul>
+        <div class="about-legal">
+            <p><strong>Copyright (c) 2026 ttt7788.</strong></p>
+            <p>CineLink 云幕智链项目代码全程由 Codex 编写。</p>
+            <p>项目中使用的第三方库、网盘接口、AList、Element Plus、Vue、TMDB 相关数据和其他外部服务分别遵循其各自的许可协议、服务条款和版权声明。</p>
+            <p>本项目仅用于个人学习、家庭媒体库管理和合法资源整理。请勿将本项目用于侵犯版权、绕过平台规则或传播未授权内容。</p>
+        </div>
     </section>
 </div>

@@ -10,7 +10,7 @@
     <script src="/static/lib/index.full.min.js"></script>
     <script src="/static/lib/axios.min.js"></script>
     <script src="/static/lib/index.iife.min.js"></script>
-    <link rel="stylesheet" href="/static/style.css?v=2.0.37" />
+    <link rel="stylesheet" href="/static/style.css?v=2.0.47" />
     <style> 
         .el-dropdown { vertical-align: middle; margin-right: 5px; } 
         .form-tip { font-size: 12px; color: #888; margin-top: 5px; line-height: 1.4; }
@@ -36,7 +36,7 @@
                         <el-icon style="margin-right: 6px; font-size: 18px; color: #409EFF;"><Timer></Timer></el-icon>
                         <span style="font-size: 14px; margin-right: 10px; color: #bfcbd9;">搜刮调度</span>
                         <el-tooltip content="Cron 格式：分 时 日 月 周，保存后重启生效" placement="bottom">
-                            <el-input v-model="config.cron_expression" size="small" style="width: 120px;" placeholder="*/30 * * * *"></el-input>
+                            <el-input v-model="config.cron_expression" size="small" style="width: 140px;" placeholder="0 10,22 * * *"></el-input>
                         </el-tooltip>
                         <el-button type="primary" size="small" circle @click="saveConfig" style="margin-left: 8px; border-radius: 50%;"><el-icon><Check></Check></el-icon></el-button>
                     </div>
@@ -121,8 +121,11 @@
                                 <el-icon><Collection></Collection></el-icon>
                                 <template #title>123云盘</template>
                             </el-menu-item>
+                            <el-menu-item index="drive_organizer">
+                                <el-icon><Operation></Operation></el-icon>
+                                <template #title>资源整理</template>
+                            </el-menu-item>
                         </el-sub-menu>
-
                         <el-sub-menu index="m_strm">
                             <template #title>
                                 <el-icon><Connection></Connection></el-icon>
@@ -169,7 +172,7 @@
                             <div>
                                 <div class="page-kicker">STRM 管理</div>
                                 <h2>规则与定时</h2>
-                                <p>把自动生成调度、格式规则和域名修复合并到一个页面，便于一次性检查 STRM 生成链路。</p>
+                                <p>统一管理自动生成计划、媒体格式规则和播放地址修复，确保 STRM 生成链路稳定可控。</p>
                             </div>
                         </section>
                         <el-tabs class="settings-center-tabs strm-tools-tabs">
@@ -380,22 +383,187 @@
                             <el-table-column prop="updated_at" label="修改时间" width="180"></el-table-column>
                             <el-table-column label="操作" width="180">
                                 <template #default="s">
-                                    <template v-if="currentDriveType !== '115'">
-                                        <el-button type="primary" size="small" plain @click="promptRename(s.row)">重命名</el-button>
-                                        <el-button type="danger" size="small" plain @click="deleteDriveFile(s.row)">删除</el-button>
-                                    </template>
-                                    <el-tag v-else type="info">115只读</el-tag>
+                                    <el-button type="primary" size="small" plain @click="promptRename(s.row)">重命名</el-button>
+                                    <el-button v-if="currentDriveType !== '115'" type="danger" size="small" plain @click="deleteDriveFile(s.row)">删除</el-button>
+                                    <el-tag v-else type="info">115 不执行删除</el-tag>
                                 </template>
                             </el-table-column>
                         </el-table>
+                    </div>
+
+                    <div v-if="activeMenu==='drive_organizer'" class="settings-center-page organizer-page">
+                        <section class="page-toolbar organizer-hero">
+                            <div class="organizer-title">
+                                <div class="page-kicker">网盘文件</div>
+                                <h2><el-icon><Operation></Operation></el-icon>自动整理资源</h2>
+                                <p>扫描指定目录，按分类策略、命名规则与洗版策略生成整理计划，再移动到目标目录。</p>
+                            </div>
+                            <div class="organizer-hero-actions">
+                                <el-button @click="previewOrganizer" :loading="organizerLoading">
+                                    <el-icon><View></View></el-icon>预览整理
+                                </el-button>
+                                <el-button type="primary" @click="runOrganizer" :loading="organizerLoading">
+                                    <el-icon><Promotion></Promotion></el-icon>开始自动整理
+                                </el-button>
+                            </div>
+                            <div class="organizer-status-grid">
+                                <div class="organizer-status-item">
+                                    <span><el-icon><Box></Box></el-icon></span>
+                                    <strong>{{ getDriveLabel(organizerConfig.drive_type) }}</strong>
+                                    <small>执行网盘</small>
+                                </div>
+                                <div class="organizer-status-item">
+                                    <span><el-icon><Operation></Operation></el-icon></span>
+                                    <strong>{{ organizerConfig.dry_run ? '只预览' : '真实整理' }}</strong>
+                                    <small>当前模式</small>
+                                </div>
+                                <div class="organizer-status-item">
+                                    <span><el-icon><Files></Files></el-icon></span>
+                                    <strong>{{ organizerConfig.max_items }}</strong>
+                                    <small>单次上限</small>
+                                </div>
+                                <div class="organizer-status-item">
+                                    <span><el-icon><DataAnalysis></DataAnalysis></el-icon></span>
+                                    <strong>{{ organizerPlan.length }}</strong>
+                                    <small>预览条目</small>
+                                </div>
+                            </div>
+                        </section>
+
+                        <el-tabs class="settings-center-tabs">
+                            <el-tab-pane>
+                                <template #label><span class="organizer-tab-label"><el-icon><Setting></Setting></el-icon>基础配置</span></template>
+                                <section class="settings-card organizer-panel">
+                                    <div class="organizer-section-head">
+                                        <h3>扫描与执行</h3>
+                                        <p>设置扫描入口、目标目录和执行范围，预览确认后再整理资源。</p>
+                                    </div>
+                                    <div class="organizer-config-grid">
+                                        <el-form-item label="执行网盘" class="organizer-field">
+                                            <el-select v-model="organizerConfig.drive_type">
+                                                <el-option v-for="item in pluginDriveOptions" :key="item.value" :label="item.label" :value="item.value"></el-option>
+                                            </el-select>
+                                        </el-form-item>
+                                        <el-form-item label="预览模式" class="organizer-field">
+                                            <el-switch v-model="organizerConfig.dry_run" active-text="只预览" inactive-text="真实整理"></el-switch>
+                                        </el-form-item>
+                                        <el-form-item label="待整理目录 ID" class="organizer-field wide">
+                                            <el-input v-model="organizerConfig.source_dir" placeholder="例如 0 / root / 文件夹ID"></el-input>
+                                        </el-form-item>
+                                        <el-form-item label="电影汇总目录 ID" class="organizer-field">
+                                            <el-input v-model="organizerConfig.movie_dir" placeholder="电影整理到这个目录"></el-input>
+                                        </el-form-item>
+                                        <el-form-item label="剧集汇总目录 ID" class="organizer-field">
+                                            <el-input v-model="organizerConfig.tv_dir" placeholder="剧集整理到这个目录"></el-input>
+                                        </el-form-item>
+                                        <el-form-item label="单次最多处理" class="organizer-field">
+                                            <el-input-number v-model="organizerConfig.max_items" :min="1" :max="200" style="width:100%;"></el-input-number>
+                                        </el-form-item>
+                                        <el-form-item label="递归扫描" class="organizer-field">
+                                            <el-switch v-model="organizerConfig.recursive" active-text="开启" inactive-text="关闭"></el-switch>
+                                        </el-form-item>
+                                        <el-form-item label="最大层级" class="organizer-field">
+                                            <el-input-number v-model="organizerConfig.max_depth" :min="0" :max="8" style="width:100%;"></el-input-number>
+                                        </el-form-item>
+                                    </div>
+                                    <div class="settings-actions">
+                                        <el-button type="primary" @click="saveOrganizerConfig"><el-icon><Check></Check></el-icon>保存配置</el-button>
+                                    </div>
+                                </section>
+                            </el-tab-pane>
+                            <el-tab-pane>
+                                <template #label><span class="organizer-tab-label"><el-icon><EditPen></EditPen></el-icon>重命名规则</span></template>
+                                <section class="settings-card organizer-panel">
+                                    <div class="organizer-section-head">
+                                        <h3>命名模板</h3>
+                                        <p>使用文件名解析和 TMDB 信息生成规范名称，预览时可直接查看效果。</p>
+                                    </div>
+                                    <div class="settings-grid two">
+                                        <el-form-item label="电影文件夹规则"><el-input v-model="organizerConfig.movie_folder_rule"></el-input></el-form-item>
+                                        <el-form-item label="电影文件规则"><el-input v-model="organizerConfig.movie_file_rule"></el-input></el-form-item>
+                                        <el-form-item label="剧集文件夹规则"><el-input v-model="organizerConfig.tv_folder_rule"></el-input></el-form-item>
+                                        <el-form-item label="季文件夹规则"><el-input v-model="organizerConfig.season_folder_rule"></el-input></el-form-item>
+                                        <el-form-item label="单集文件规则"><el-input v-model="organizerConfig.episode_file_rule"></el-input></el-form-item>
+                                    </div>
+                                </section>
+                            </el-tab-pane>
+                            <el-tab-pane>
+                                <template #label><span class="organizer-tab-label"><el-icon><Guide></Guide></el-icon>二级分类策略</span></template>
+                                <section class="settings-card organizer-panel">
+                                    <div class="organizer-section-head">
+                                        <h3>分类落点</h3>
+                                        <p>按媒体类型、题材、地区和自定义条件匹配目标目录。</p>
+                                    </div>
+                                    <el-alert type="info" show-icon :closable="false" class="organizer-help-alert">
+                                        <template #title>支持 cid115、cid_quark、cid_aliyun、cid123，也支持 target_id / folder_id / dir_id 通用目录字段。</template>
+                                    </el-alert>
+                                    <el-input v-model="organizerConfig.category_strategy" type="textarea" :rows="28" class="strategy-editor"></el-input>
+                                    <div class="settings-actions">
+                                        <el-button type="primary" @click="saveOrganizerConfig">保存分类策略</el-button>
+                                    </div>
+                                </section>
+                            </el-tab-pane>
+                            <el-tab-pane>
+                                <template #label><span class="organizer-tab-label"><el-icon><Filter></Filter></el-icon>洗版策略</span></template>
+                                <section class="settings-card organizer-panel">
+                                    <div class="organizer-section-head">
+                                        <h3>重复资源选择</h3>
+                                        <p>相同作品或同一集按清晰度、来源和质量优先级保留更合适的版本。</p>
+                                    </div>
+                                    <el-alert type="info" show-icon :closable="false" class="organizer-help-alert">
+                                        <template #title>洗版策略会在发现重复资源时生效，建议先配置分类目录再执行整理。</template>
+                                    </el-alert>
+                                    <el-input v-model="organizerConfig.wash_strategy" type="textarea" :rows="22" class="strategy-editor"></el-input>
+                                    <div class="settings-actions">
+                                        <el-button type="primary" @click="saveOrganizerConfig">保存洗版策略</el-button>
+                                    </div>
+                                </section>
+                            </el-tab-pane>
+                            <el-tab-pane>
+                                <template #label><span class="organizer-tab-label"><el-icon><Document></Document></el-icon>变量说明</span></template>
+                                <el-table :data="organizerVariables" border stripe>
+                                    <el-table-column prop="k" label="变量名" width="220"></el-table-column>
+                                    <el-table-column prop="d" label="说明"></el-table-column>
+                                    <el-table-column prop="sample" label="示例值" min-width="260"></el-table-column>
+                                </el-table>
+                            </el-tab-pane>
+                            <el-tab-pane>
+                                <template #label><span class="organizer-tab-label"><el-icon><Memo></Memo></el-icon>语法说明</span></template>
+                                <el-table :data="organizerSyntax" border stripe>
+                                    <el-table-column prop="k" label="语法" min-width="340"></el-table-column>
+                                    <el-table-column prop="d" label="说明" min-width="420"></el-table-column>
+                                </el-table>
+                            </el-tab-pane>
+                        </el-tabs>
+
+                        <section class="settings-card organizer-preview-card">
+                            <div class="section-head">
+                                <div>
+                                    <h3><el-icon><Tickets></Tickets></el-icon>整理预览</h3>
+                                    <p>展示整理计划和执行结果；预览模式不会移动文件。</p>
+                                </div>
+                            </div>
+                            <el-table :data="organizerPlan" v-loading="organizerLoading" stripe style="width:100%;">
+                                <el-table-column prop="source_path" label="原路径" min-width="260"></el-table-column>
+                                <el-table-column label="类型" width="90">
+                                    <template #default="s"><el-tag :type="s.row.media_type === 'tv' ? 'success' : 'primary'">{{ s.row.media_type === 'tv' ? '剧集' : '电影' }}</el-tag></template>
+                                </el-table-column>
+                                <el-table-column label="分类" width="130">
+                                    <template #default="s"><el-tag v-if="s.row.category" type="warning" effect="plain">{{ s.row.category }}</el-tag><span v-else class="muted-text">默认</span></template>
+                                </el-table-column>
+                                <el-table-column prop="target_path" label="目标路径" min-width="280"></el-table-column>
+                                <el-table-column prop="status" label="状态" width="110"></el-table-column>
+                                <el-table-column prop="message" label="结果" min-width="180"></el-table-column>
+                            </el-table>
+                        </section>
                     </div>
 
                     <div v-if="activeMenu==='plugin_develop'" class="plugin-page">
                         <section class="page-toolbar">
                             <div>
                                 <div class="page-kicker">插件</div>
-                                <h2>插件开发</h2>
-                                <p>把可选能力独立成插件，核心功能保持简洁，后续可继续接入站点采集、网盘工具和自动化任务。</p>
+                                <h2>插件与回收站</h2>
+                                <p>集中管理可选能力，当前提供回收站读取、清空和自动清理。</p>
                             </div>
                         </section>
                         <section class="plugin-dev-grid">
@@ -407,15 +575,15 @@
                             </article>
                             <article class="plugin-dev-card">
                                 <div class="plugin-dev-icon muted"><el-icon><Connection></Connection></el-icon></div>
-                                <h3>站点采集适配</h3>
-                                <p>采集类插件保持预留入口，避免不稳定站点逻辑影响主应用启动。</p>
-                                <el-tag type="info" effect="plain">预留</el-tag>
+                                <h3>站点采集</h3>
+                                <p>用于集中管理站点采集能力，便于和主流程保持隔离。</p>
+                                <el-tag type="info" effect="plain">未启用</el-tag>
                             </article>
                             <article class="plugin-dev-card">
                                 <div class="plugin-dev-icon muted"><el-icon><Tools></Tools></el-icon></div>
-                                <h3>网盘工具扩展</h3>
-                                <p>后续可把批量检测、批量移动、字幕整理等工具独立成插件。</p>
-                                <el-tag type="info" effect="plain">规划中</el-tag>
+                                <h3>网盘工具</h3>
+                                <p>用于集中管理批量检测、批量移动和字幕整理等网盘辅助能力。</p>
+                                <el-tag type="info" effect="plain">未启用</el-tag>
                             </article>
                         </section>
                     </div>
@@ -649,57 +817,85 @@
                                         <el-tag :type="group.tag" effect="plain">{{ group.total }}</el-tag>
                                     </div>
 
-                                    <el-table :data="group.items" row-key="tmdb_id" stripe @selection-change="handleSelectionChange" class="record-table">
-                                        <el-table-column type="selection" width="42"></el-table-column>
-                                        <el-table-column label="作品" min-width="170" show-overflow-tooltip>
-                                            <template #default="s">
-                                                <div class="record-title">
-                                                    <span>{{ s.row.title }}</span>
-                                                    <el-tag size="small" :type="s.row.media_type === 'tv' ? 'success' : 'primary'">{{ getMediaTypeLabel(s.row.media_type) }}</el-tag>
+                                    <div class="record-section-list">
+                                        <section v-for="section in group.sections" :key="group.type + '-' + section.key" class="record-media-section" :class="'record-media-section-' + section.key">
+                                            <div class="record-section-head">
+                                                <div>
+                                                    <h4>{{ section.label }}</h4>
+                                                    <p>{{ getRecordSectionSummary(section) }}</p>
                                                 </div>
-                                            </template>
-                                        </el-table-column>
-                                        <el-table-column label="状态" width="86">
-                                            <template #default="s"><el-tag type="success" size="small">已转存</el-tag></template>
-                                        </el-table-column>
-                                        <el-table-column label="剧集绑定" min-width="260" show-overflow-tooltip>
-                                            <template #default="s">
-                                                <div class="record-binding">
-                                                    <el-tag v-if="s.row.media_type === 'tv' && s.row.cloud_path" type="success" size="small">已绑定</el-tag>
-                                                    <el-tag v-else-if="s.row.media_type === 'tv'" type="danger" size="small">未绑定</el-tag>
-                                                    <el-tag v-else type="info" size="small">电影</el-tag>
-                                                    <span>{{ getSeriesBindingText(s.row) }}</span>
-                                                </div>
-                                                <div v-if="s.row.media_type === 'tv' && s.row.last_checked_at" class="record-binding-sub">最近扫描 {{ s.row.last_checked_at }}</div>
-                                            </template>
-                                        </el-table-column>
-                                        <el-table-column label="操作" width="138">
-                                            <template #default="s">
-                                                <el-dropdown size="small" @command="(cmd) => subscribe(s.row, true, true, cmd)">
-                                                    <el-button type="primary" size="small" plain>重推<el-icon class="el-icon--right"><arrow-down></arrow-down></el-icon></el-button>
-                                                    <template #dropdown>
-                                                        <el-dropdown-menu>
-                                                            <el-dropdown-item command="115">重推至 115网盘</el-dropdown-item>
-                                                            <el-dropdown-item command="aliyun">重推至 阿里云盘</el-dropdown-item>
-                                                            <el-dropdown-item command="quark">重推至 夸克网盘</el-dropdown-item>
-                                                        </el-dropdown-menu>
+                                                <el-tag :type="section.tag" effect="plain">{{ section.total }}</el-tag>
+                                            </div>
+
+                                            <el-table
+                                                v-if="section.items.length"
+                                                :data="section.items"
+                                                row-key="tmdb_id"
+                                                stripe
+                                                @selection-change="handleSelectionChange"
+                                                class="record-table">
+                                                <el-table-column type="selection" width="42"></el-table-column>
+                                                <el-table-column label="作品" min-width="190" show-overflow-tooltip>
+                                                    <template #default="s">
+                                                        <div class="record-title">
+                                                            <span>{{ s.row.title }}</span>
+                                                            <el-tag size="small" :type="section.tag">{{ getMediaTypeLabel(s.row.media_type) }}</el-tag>
+                                                        </div>
                                                     </template>
-                                                </el-dropdown>
-                                                <el-button type="danger" size="small" plain @click="deleteRecord(s.row)">清理</el-button>
-                                            </template>
-                                        </el-table-column>
-                                    </el-table>
-                                    <div v-if="group.total > transferRecordPageSize" class="record-pagination">
-                                        <span class="record-page-hint">当前显示 {{ group.rangeText }}</span>
-                                        <el-pagination
-                                            background
-                                            small
-                                            layout="prev, pager, next"
-                                            :total="group.total"
-                                            :page-size="transferRecordPageSize"
-                                            :current-page="group.page"
-                                            @current-change="(page) => setRecordGroupPage(group.type, page)">
-                                        </el-pagination>
+                                                </el-table-column>
+                                                <el-table-column label="状态" width="86">
+                                                    <template #default="s"><el-tag type="success" size="small">已转存</el-tag></template>
+                                                </el-table-column>
+                                                <el-table-column v-if="section.key === 'tv'" label="剧集绑定" min-width="280" show-overflow-tooltip>
+                                                    <template #default="s">
+                                                        <div class="record-binding">
+                                                            <el-tag v-if="s.row.cloud_path" type="success" size="small">已绑定</el-tag>
+                                                            <el-tag v-else type="danger" size="small">未绑定</el-tag>
+                                                            <span>{{ getSeriesBindingText(s.row) }}</span>
+                                                        </div>
+                                                        <div v-if="s.row.last_checked_at" class="record-binding-sub">最近扫描 {{ s.row.last_checked_at }}</div>
+                                                        <el-button
+                                                            type="primary"
+                                                            link
+                                                            size="small"
+                                                            class="record-bind-action"
+                                                            @click="manualBindSeriesDirectory(s.row)">
+                                                            {{ s.row.cloud_path ? '修改绑定目录' : '手动绑定目录' }}
+                                                        </el-button>
+                                                    </template>
+                                                </el-table-column>
+                                                <el-table-column label="操作" width="138">
+                                                    <template #default="s">
+                                                        <el-dropdown size="small" @command="(cmd) => subscribe(s.row, true, true, cmd)">
+                                                            <el-button type="primary" size="small" plain>重推<el-icon class="el-icon--right"><arrow-down></arrow-down></el-icon></el-button>
+                                                            <template #dropdown>
+                                                                <el-dropdown-menu>
+                                                                    <el-dropdown-item command="115">重推至 115网盘</el-dropdown-item>
+                                                                    <el-dropdown-item command="aliyun">重推至 阿里云盘</el-dropdown-item>
+                                                                    <el-dropdown-item command="quark">重推至 夸克网盘</el-dropdown-item>
+                                                                    <el-dropdown-item command="123">重推至 123云盘</el-dropdown-item>
+                                                                </el-dropdown-menu>
+                                                            </template>
+                                                        </el-dropdown>
+                                                        <el-button type="danger" size="small" plain @click="deleteRecord(s.row)">清理</el-button>
+                                                    </template>
+                                                </el-table-column>
+                                            </el-table>
+                                            <el-empty v-else :description="section.empty" :image-size="56"></el-empty>
+
+                                            <div v-if="section.total > transferRecordPageSize" class="record-pagination">
+                                                <span class="record-page-hint">当前显示 {{ section.rangeText }}</span>
+                                                <el-pagination
+                                                    background
+                                                    small
+                                                    layout="prev, pager, next"
+                                                    :total="section.total"
+                                                    :page-size="transferRecordPageSize"
+                                                    :current-page="section.page"
+                                                    @current-change="(page) => setRecordGroupPage(group.type, section.key, page)">
+                                                </el-pagination>
+                                            </div>
+                                        </section>
                                     </div>
                                 </section>
                             </div>
@@ -707,17 +903,40 @@
                         </div>
                     </div>
 
-                    <div v-if="activeMenu==='settings_center'" class="settings-center-page">
-                        <section class="page-toolbar">
+                    <div v-if="activeMenu==='settings_center'" class="settings-center-page config-center-page">
+                        <section class="page-toolbar config-center-hero">
                             <div>
                                 <div class="page-kicker">系统配置</div>
-                                <h2>配置中心</h2>
-                                <p>把搜刮源、网盘授权、默认保存目录和插件配置集中到一个页面，减少菜单跳转。</p>
+                                <h2><el-icon><Setting></Setting></el-icon>配置中心</h2>
+                                <p>统一配置搜刮源、网盘授权、默认保存目录、自动整理和插件选项。</p>
                             </div>
                             <div class="settings-toolbar-actions">
                                 <el-button type="primary" @click="saveConfig">保存基础配置</el-button>
                                 <el-button type="success" plain @click="saveRecycleConfig">保存插件配置</el-button>
                             </div>
+                        </section>
+
+                        <section class="config-overview-grid">
+                            <article class="config-overview-card">
+                                <span><el-icon><Search></Search></el-icon></span>
+                                <strong>{{ config.pansou_domain ? '已配置' : '未配置' }}</strong>
+                                <small>盘搜接口</small>
+                            </article>
+                            <article class="config-overview-card">
+                                <span><el-icon><Files></Files></el-icon></span>
+                                <strong>{{ driveConfigCards.filter(item => item.ready).length }}/{{ driveConfigCards.length }}</strong>
+                                <small>网盘授权</small>
+                            </article>
+                            <article class="config-overview-card">
+                                <span><el-icon><Connection></Connection></el-icon></span>
+                                <strong>{{ config.pancheck_enabled === '1' ? '已开启' : '已关闭' }}</strong>
+                                <small>链接检测</small>
+                            </article>
+                            <article class="config-overview-card">
+                                <span><el-icon><Operation></Operation></el-icon></span>
+                                <strong>{{ config.pipeline_auto_organize === '1' ? '已开启' : '未开启' }}</strong>
+                                <small>转存后整理</small>
+                            </article>
                         </section>
 
                         <el-tabs class="settings-center-tabs">
@@ -753,6 +972,20 @@
                                         <el-form-item>
                                             <el-switch v-model="config.pancheck_enabled" active-value="1" inactive-value="0" active-text="搜索结果与转存前检测链接有效性" inactive-text="关闭检测"></el-switch>
                                         </el-form-item>
+                                        <el-row :gutter="16">
+                                            <el-col :span="12">
+                                                <el-form-item label="转存成功后自动整理">
+                                                    <el-switch v-model="config.pipeline_auto_organize" active-value="1" inactive-value="0" active-text="开启" inactive-text="关闭"></el-switch>
+                                                    <div class="form-tip">开启后，采集、订阅、搜索、转存成功后会以本次保存目录为入口执行资源整理规则。</div>
+                                                </el-form-item>
+                                            </el-col>
+                                            <el-col :span="12">
+                                                <el-form-item label="单次整理上限">
+                                                    <el-input-number v-model="config.pipeline_organize_max_items" :min="1" :max="200" controls-position="right" style="width: 180px;"></el-input-number>
+                                                    <div class="form-tip">建议先在“资源整理”页面预览规则，确认后再提高单次处理数量。</div>
+                                                </el-form-item>
+                                            </el-col>
+                                        </el-row>
                                     </el-form>
                                 </section>
                             </el-tab-pane>
@@ -870,6 +1103,14 @@
                                 </el-form-item>
                                 <el-form-item>
                                     <el-switch v-model="config.pancheck_enabled" active-value="1" inactive-value="0" active-text="搜索结果与转存前检测链接有效性" inactive-text="关闭检测"></el-switch>
+                                </el-form-item>
+                                <el-form-item>
+                                    <template #label><strong>转存成功后自动整理</strong></template>
+                                    <div style="display: flex; align-items: center; gap: 20px;">
+                                        <el-switch v-model="config.pipeline_auto_organize" active-value="1" inactive-value="0" active-text="开启" inactive-text="关闭"></el-switch>
+                                        <el-input-number v-model="config.pipeline_organize_max_items" :min="1" :max="200" controls-position="right"></el-input-number>
+                                    </div>
+                                    <div class="form-tip">开启后，采集、订阅、搜索、转存成功后会以本次保存目录为入口执行资源整理规则。</div>
                                 </el-form-item>
                                 <el-form-item style="margin-top: 20px;"><el-button type="primary" size="large" @click="saveConfig">保存搜刮配置</el-button></el-form-item>
                             </el-form>
@@ -1043,6 +1284,6 @@
     </div>
     
     <script src="/static/useStrm.js?v=2.0.17"></script>
-    <script src="/static/app.js?v=2.0.35"></script>
+    <script src="/static/app.js?v=2.0.47"></script>
 </body>
 </html>

@@ -19,7 +19,7 @@ const app = createApp({
         const drivePaths = ref([]); 
         const currentDriveType = ref(''); 
         
-        const config = ref({ api_domain: '', image_domain: '', api_key: '', pansou_domain: '', pancheck_domain: '', pancheck_enabled: '1', cookie_115: '', cookie_quark: '', token_aliyun: '', drive115_save_dir: '0', quark_save_dir: '0', aliyun_save_dir: 'root', drive123_client_id: '', drive123_client_secret: '', drive123_save_dir: '0', cron_expression: '', auto_subscribe_new: '0', auto_subscribe_drive: '115', magnet_download_drive: '115', ed2k_download_drive: '115' });
+        const config = ref({ api_domain: '', image_domain: '', api_key: '', pansou_domain: '', pancheck_domain: '', pancheck_enabled: '1', cookie_115: '', cookie_quark: '', token_aliyun: '', drive115_save_dir: '0', quark_save_dir: '0', aliyun_save_dir: 'root', drive123_client_id: '', drive123_client_secret: '', drive123_save_dir: '0', cron_expression: '0 10,22 * * *', auto_subscribe_new: '0', auto_subscribe_drive: '115', magnet_download_drive: '115', ed2k_download_drive: '115', pipeline_auto_organize: '0', pipeline_organize_max_items: '30' });
 
         const pv = ref(false), pr = ref({}), curKw = ref('');
         const panSearchError = ref('');
@@ -39,6 +39,69 @@ const app = createApp({
         const transferTaskForm = ref({ urls: '' });
         const transferDownloadTasks = ref([]);
         const transferTaskLoading = ref(false);
+        const organizerConfig = ref({
+            drive_type: 'quark',
+            source_dir: '0',
+            movie_dir: '0',
+            tv_dir: '0',
+            max_items: 30,
+            max_depth: 2,
+            recursive: true,
+            dry_run: true,
+            movie_folder_rule: '{first_letter}-{title}-{year}',
+            movie_file_rule: '{title}.{year}.{resource_pix}.{resource_source}.{video_encode}{ext}',
+            tv_folder_rule: '{first_letter}-{title}-{year}',
+            season_folder_rule: 'Season {season_num:02d}',
+            episode_file_rule: '{title}.{year}.{season_episode}.{resource_pix}.{resource_source}.{video_encode}{ext}',
+            category_strategy: '',
+            wash_strategy: '',
+        });
+        const organizerVariables = [
+            { k: '{original_name}', d: '原文件名', sample: '钢铁侠.2008.2160p.UHD.BluRay.x265.10bit.HDR.TrueHD.7.1-TnT.mkv' },
+            { k: '{ext}', d: '扩展名', sample: 'mkv' },
+            { k: '{title}', d: 'TMDB中的标题', sample: '钢铁侠' },
+            { k: '{en_title}', d: 'TMDB中的英文标题，取决于识别数据', sample: 'Iron Man' },
+            { k: '{first_letter}', d: '标题的大写拼音首字母', sample: 'G' },
+            { k: '{year}', d: 'TMDB中的年份', sample: '2008' },
+            { k: '{tmdb_id}', d: 'TMDB ID', sample: '1726' },
+            { k: '{resource_pix}', d: '分辨率', sample: '2160p' },
+            { k: '{resource_version}', d: '资源版本', sample: 'IMAX、HQ、3D、CC、DC' },
+            { k: '{resource_source}', d: '资源来源', sample: 'USA.UHD、NF、DSNP' },
+            { k: '{resource_type}', d: '资源质量', sample: 'BluRay、WEB-DL、HDTV' },
+            { k: '{resource_effect}', d: '特效', sample: 'DV.HDR、DV、HDR、SDR' },
+            { k: '{video_encode}', d: '视频编码', sample: 'H265.10bit、REMUX' },
+            { k: '{audio_encode}', d: '音频编码', sample: 'TrueHD.7.1' },
+            { k: '{resource_team}', d: '发布组', sample: 'TnT' },
+            { k: '{fps}', d: '帧率', sample: '60FPS' },
+            { k: '{season_episode}', d: '季集 SxxExx', sample: 'S01E01' },
+            { k: '{season_num}', d: '季号', sample: '1' },
+            { k: '{episode_num}', d: '集号', sample: '1' },
+            { k: '{disc_num}', d: '盘号', sample: '1' },
+            { k: '{season_name}', d: '季名', sample: '东海篇' },
+            { k: '{season_year}', d: '季年份，可为空', sample: '1999' },
+            { k: '{episode_name}', d: '集名', sample: '我是路飞！将要成为海贼王的男人！' },
+            { k: '{custom_regex_match}', d: '自定义匹配', sample: '自定义匹配' },
+        ];
+        const organizerSyntax = [
+            { k: 'cid115 / cid_quark / cid_aliyun / cid123', d: '二级分类策略里的单盘目录字段，分别对应 115、夸克、阿里云盘、123 云盘' },
+            { k: 'target_id / folder_id / dir_id', d: '通用自定义目录字段；没有单盘目录字段时会作为目标目录 ID 使用' },
+            { k: '{变量名}', d: '取这个变量的值' },
+            { k: '<...>', d: '用尖括号包围的字符串块，块里 {变量名} 不为空时才取块里的内容' },
+            { k: '简单来说重命名规则就是多个块，然后拼在一起', d: '适合把可选字段用 <...> 包起来' },
+            { k: '<{{name}}...>', d: '给块取名字，之后可以用 {name} 反复引用该块的值' },
+            { k: '<?{{name}}...>', d: '有名字的块可以只取名不输出，便于在规则后段引用' },
+            { k: '{} 里支持 python 的字符串函数及语法', d: '如下方 replace/lower/upper/条件表达式' },
+            { k: "{resource_effect.replace(' ', '')}", d: '替换 resource_effect 中的空格' },
+            { k: '{resource_effect.lower()}', d: '将 resource_effect 转换为小写' },
+            { k: '{resource_effect.upper()}', d: '将 resource_effect 转换为大写' },
+            { k: "{'2160p' if resource_pix=='4k' else resource_pix}", d: '如果 resource_pix 为 4k，返回 2160p，否则返回原值' },
+            { k: '<{title}> 和 {title} 的区别', d: '<{title}> 会先判断 title 是否为空，后者直接取 title 的值' },
+            { k: '如果想用 { }，可用 [[ ]] 代替', d: '最终会替换为 { }，避免语法冲突' },
+            { k: '{first_letter}-{title}-{year}-[tmdb={tmdb_id}]', d: '文件夹命名规则示例' },
+            { k: '{title}.{year}.<{resource_pix}>.<{fps}>.<{resource_version}>.<{resource_source}>.<{resource_type}>.<{resource_effect}>.<{video_encode}>.<{audio_encode}>-<{resource_team}>', d: '电影命名规则示例' },
+        ];
+        const organizerPlan = ref([]);
+        const organizerLoading = ref(false);
 
         const startLogPoll = () => {
             if (logTimer.value) clearInterval(logTimer.value);
@@ -103,9 +166,9 @@ const app = createApp({
 
         const getMenuTitle = (key) => ({ hot: '今日热门影视', movie: '本地电影库', tv: '本地剧集库', discover: '全网聚合搜索' }[key] || '');
         const mediaPageMeta = computed(() => ({
-            hot: { kicker: '发现资源', title: '今日热门', desc: '聚合当前热度较高的影视内容，适合快速搜盘、转存和入库。', tone: 'hot' },
-            movie: { kicker: '本地库', title: '全部电影库', desc: '浏览已同步的电影条目，按需搜索网盘资源并转存到指定目录。', tone: 'movie' },
-            tv: { kicker: '本地库', title: '全部剧集库', desc: '集中管理剧集资源，转存后可绑定网盘目录用于后续追更。', tone: 'tv' },
+            hot: { kicker: '发现资源', title: '今日热门', desc: '展示当天热门影视内容，适合快速搜盘、转存和入库。', tone: 'hot' },
+            movie: { kicker: '媒体库', title: '全部电影库', desc: '浏览已同步的电影条目，按需搜索网盘资源并转存到指定目录。', tone: 'movie' },
+            tv: { kicker: '媒体库', title: '全部剧集库', desc: '集中管理剧集资源，转存后可绑定网盘目录用于追更扫描。', tone: 'tv' },
         }[activeMenu.value] || { kicker: '媒体库', title: getMenuTitle(activeMenu.value), desc: '', tone: 'default' }));
         const discoverQuickKeywords = ref(['4K 杜比视界', '国配 动作', '科幻 2025', '豆瓣高分', '喜剧 合家欢', '悬疑 犯罪', '动画 电影', '韩剧 最新']);
         const discoverHotStats = computed(() => {
@@ -155,24 +218,42 @@ const app = createApp({
             const tv = items.filter(item => item.media_type === 'tv').length;
             return { total: items.length, movie: Math.max(items.length - tv, 0), tv };
         });
-        const getRecordGroupPage = (type) => Number(recordGroupPages.value[type] || 1);
-        const setRecordGroupPage = (type, page) => {
-            recordGroupPages.value = { ...recordGroupPages.value, [type]: page };
+        const recordSectionMetas = [
+            { key: 'movie', label: '电影记录', tag: 'primary', empty: '暂无电影转存记录' },
+            { key: 'tv', label: '剧集记录', tag: 'success', empty: '暂无剧集转存记录' },
+        ];
+        const normalizeMediaType = (mediaType) => mediaType === 'tv' ? 'tv' : 'movie';
+        const getRecordSectionPageKey = (driveType, mediaType) => `${driveType || 'unknown'}:${mediaType}`;
+        const getRecordGroupPage = (type, mediaType = 'all') => Number(recordGroupPages.value[getRecordSectionPageKey(type, mediaType)] || 1);
+        const setRecordGroupPage = (type, mediaType, page) => {
+            recordGroupPages.value = { ...recordGroupPages.value, [getRecordSectionPageKey(type, mediaType)]: page };
         };
         const pagedRecordGroups = computed(() => recordGroups.value.map(group => {
-            const total = group.items.length;
-            const maxPage = Math.max(Math.ceil(total / transferRecordPageSize), 1);
-            const page = Math.min(Math.max(getRecordGroupPage(group.type), 1), maxPage);
-            const start = (page - 1) * transferRecordPageSize;
+            const allItems = group.items || [];
+            const sections = recordSectionMetas.map(meta => {
+                const sectionItems = allItems.filter(item => normalizeMediaType(item.media_type) === meta.key);
+                const total = sectionItems.length;
+                const maxPage = Math.max(Math.ceil(total / transferRecordPageSize), 1);
+                const page = Math.min(Math.max(getRecordGroupPage(group.type, meta.key), 1), maxPage);
+                const start = (page - 1) * transferRecordPageSize;
+                return {
+                    ...meta,
+                    total,
+                    page,
+                    allItems: sectionItems,
+                    items: sectionItems.slice(start, start + transferRecordPageSize),
+                    rangeText: total ? `${start + 1}-${Math.min(start + transferRecordPageSize, total)} / ${total}` : '0 / 0',
+                };
+            });
             return {
                 ...group,
-                allItems: group.items,
-                items: group.items.slice(start, start + transferRecordPageSize),
-                total,
-                page,
-                rangeText: total ? `${start + 1}-${Math.min(start + transferRecordPageSize, total)} / ${total}` : '0 / 0',
+                allItems,
+                sections,
+                total: allItems.length,
+                movieTotal: sections.find(section => section.key === 'movie')?.total || 0,
+                tvTotal: sections.find(section => section.key === 'tv')?.total || 0,
             };
-        }));
+        }).filter(group => group.total > 0));
         const recordPageRangeText = computed(() => {
             if (!records.value.length) return '暂无转存记录';
             const start = (transferRecordPage.value - 1) * transferRecordPageSize + 1;
@@ -188,7 +269,14 @@ const app = createApp({
             const items = group.allItems || group.items || [];
             const tvItems = items.filter(item => item.media_type === 'tv');
             const bound = tvItems.filter(item => item.cloud_path).length;
-            return `${items.length} 条成功记录，剧集已绑定 ${bound} / 未绑定 ${Math.max(tvItems.length - bound, 0)}`;
+            return `${items.length} 条成功记录，电影 ${group.movieTotal || 0}，剧集 ${group.tvTotal || 0}，剧集已绑定 ${bound} / 未绑定 ${Math.max(tvItems.length - bound, 0)}`;
+        };
+        const getRecordSectionSummary = (section) => {
+            if (section.key === 'tv') {
+                const bound = section.allItems.filter(item => item.cloud_path).length;
+                return `已绑定 ${bound} / 未绑定 ${Math.max(section.total - bound, 0)}`;
+            }
+            return '电影无需追更绑定';
         };
         const panSearchStats = computed(() => {
             const groups = Object.values(pr.value || {}).filter(Array.isArray);
@@ -203,7 +291,15 @@ const app = createApp({
         const formatFileSize = (bytes) => { if (bytes === 0) return '0 B'; const k = 1024, sizes = ['B', 'KB', 'MB', 'GB', 'TB']; const i = Math.floor(Math.log(bytes) / Math.log(k)); return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i]; };
 
         const loadConfig = async () => { try { const r = await axios.get(`${API_BASE}/config`); config.value = { ...config.value, ...r.data }; } catch (e) {} };
-        const saveConfig = async () => { try { await axios.post(`${API_BASE}/config`, config.value); ElMessage.success('配置已保存'); } catch (e) { ElMessage.error('保存失败'); } };
+        const saveConfig = async () => {
+            try {
+                const r = await axios.post(`${API_BASE}/config`, config.value);
+                if (r.data?.data?.cron_expression) config.value.cron_expression = r.data.data.cron_expression;
+                ElMessage.success('配置已保存');
+            } catch (e) {
+                ElMessage.error('保存失败');
+            }
+        };
 
         const loadLocalMedia = async (t, page = 1) => { 
             loading.value = true; 
@@ -436,6 +532,60 @@ const app = createApp({
         const promptRename = async (row) => { try { const { value } = await msgBox.prompt('请输入新名称', '重命名', { inputValue: row.name }); if (value) { const r = await axios.post(`${API_BASE}/drive/action`, { drive_type: currentDriveType.value, action: 'rename', file_id: row.id, new_name: value }); if (r.data.code === 200) fetchDriveFiles(drivePaths.value[drivePaths.value.length - 1].id); } } catch(e){} };
         const deleteDriveFile = async (row) => { try { await msgBox.confirm(`确定永久删除？`, '警告', { type: 'danger' }); const r = await axios.post(`${API_BASE}/drive/action`, { drive_type: currentDriveType.value, action: 'delete', file_id: row.id }); if (r.data.code === 200) fetchDriveFiles(drivePaths.value[drivePaths.value.length - 1].id); } catch(e){} };
 
+        const loadOrganizerConfig = async () => {
+            try {
+                const r = await axios.get(`${API_BASE}/drive_organizer/config`);
+                organizerConfig.value = { ...organizerConfig.value, ...(r.data.data || {}) };
+            } catch (e) {
+                ElMessage.error('读取网盘整理配置失败');
+            }
+        };
+        const saveOrganizerConfig = async () => {
+            try {
+                const r = await axios.post(`${API_BASE}/drive_organizer/config`, organizerConfig.value);
+                organizerConfig.value = { ...organizerConfig.value, ...(r.data.data || {}) };
+                ElMessage.success(r.data.message || '网盘整理配置已保存');
+            } catch (e) {
+                ElMessage.error(e.response?.data?.message || '保存网盘整理配置失败');
+            }
+        };
+        const previewOrganizer = async () => {
+            organizerLoading.value = true;
+            try {
+                const r = await axios.post(`${API_BASE}/drive_organizer/preview`, organizerConfig.value);
+                if (r.data.code !== 200) throw new Error(r.data.message || '预览失败');
+                organizerPlan.value = r.data.data.items || [];
+                ElMessage.success(`已生成 ${organizerPlan.value.length} 条整理预览`);
+            } catch (e) {
+                organizerPlan.value = [];
+                ElMessage.error(e.response?.data?.message || e.message || '预览失败');
+            } finally {
+                organizerLoading.value = false;
+            }
+        };
+        const runOrganizer = async () => {
+            try {
+                await ElMessageBox.confirm(
+                    organizerConfig.value.dry_run ? '当前是预览模式，不会移动文件。继续执行检查？' : '将按预览规则重命名并移动网盘文件，确认开始？',
+                    '自动整理确认',
+                    { type: organizerConfig.value.dry_run ? 'info' : 'warning' }
+                );
+            } catch (e) {
+                return;
+            }
+            organizerLoading.value = true;
+            try {
+                const r = await axios.post(`${API_BASE}/drive_organizer/run`, organizerConfig.value);
+                if (r.data.code !== 200) throw new Error(r.data.message || '整理失败');
+                organizerPlan.value = r.data.data.items || [];
+                ElMessage.success(`整理完成：成功 ${r.data.data.success}，失败 ${r.data.data.failed}`);
+            } catch (e) {
+                ElMessage.error(e.response?.data?.message || e.message || '整理失败');
+            } finally {
+                organizerLoading.value = false;
+            }
+        };
+
         const handleMenuSelect = (i) => { 
             activeMenu.value = i; 
             selectedMediaList.value = []; 
@@ -466,6 +616,7 @@ const app = createApp({
             else if(i === 'drive_aliyun') initDriveView('aliyun');
             else if(i === 'drive_115') initDriveView('115');
             else if(i === 'drive_123') initDriveView('123');
+            else if(i === 'drive_organizer') loadOrganizerConfig();
             else if(i === 'settings_center') loadRecycleConfig();
             else if(i === 'discover') { if (!discoverHot.value.length) loadDiscoverHot(); }
             else if(i === 'strm_configs') strmModule.loadStrmConfigs();
@@ -690,6 +841,48 @@ const app = createApp({
                 bindingRefreshing.value = false;
             }
         };
+
+        const manualBindSeriesDirectory = async (row) => {
+            if (!row || row.media_type !== 'tv') return;
+            const title = row.title || '未命名剧集';
+            const driveLabel = getDriveLabel(row.drive_type);
+            const placeholder = row.cloud_parent_id || '请输入网盘文件夹 ID，例如 0 / root / 文件夹ID';
+            try {
+                const { value } = await ElMessageBox.prompt(
+                    `为《${title}》绑定 ${driveLabel} 的追剧目录。可填写：目录ID，或 目录ID|显示路径`,
+                    '手动绑定追剧目录',
+                    {
+                        inputValue: row.cloud_parent_id || '',
+                        inputPlaceholder: placeholder,
+                        confirmButtonText: '绑定并扫描',
+                        cancelButtonText: '取消',
+                    }
+                );
+                const raw = String(value || '').trim();
+                if (!raw) {
+                    ElMessage.warning('请填写追剧目录 ID');
+                    return;
+                }
+                const [cloudParentId, ...pathParts] = raw.split('|').map(part => part.trim());
+                if (!cloudParentId) {
+                    ElMessage.warning('请填写追剧目录 ID');
+                    return;
+                }
+                const r = await axios.post(`${API_BASE}/series_bindings/manual`, {
+                    tmdb_id: row.tmdb_id,
+                    title,
+                    drive_type: row.drive_type || '115',
+                    cloud_parent_id: cloudParentId,
+                    cloud_path: pathParts.join('|'),
+                });
+                ElMessage.success(r.data.message || '绑定成功');
+                loadRecords();
+                if (activeMenu.value === 'subscriptions') loadSubscriptions();
+            } catch (e) {
+                if (e === 'cancel' || e === 'close') return;
+                ElMessage.error(e.response?.data?.detail || e.message || '绑定失败');
+            }
+        };
         
         const runTaskManual = async () => { 
             try { 
@@ -835,7 +1028,8 @@ const app = createApp({
             driveFiles, driveLoading, drivePaths, currentDriveType, currentDriveStatus, driveConfigCards, pluginDriveOptions, getDriveConfigStatus, requireDriveReady, formatFileSize, clickDriveBreadcrumb, openDriveFolder, promptMkdir, promptRename, deleteDriveFile,
             recycleConfig, recycleItems, recycleLoading, loadRecycleConfig, saveRecycleConfig, loadRecycleItems, emptyRecyclebin, getRecycleItems,
             transferTaskForm, transferDownloadTasks, transferTaskLoading, loadTransferDownloadTasks, submitTransferDownloadTasks, retryTransferDownloadTask, deleteTransferDownloadTask, detectTransferLinkType, getTransferTaskTypeLabel, getTransferTaskStatusType,
-            getMenuTitle, getDriveLabel, getDriveTagType, getMediaTypeLabel, getDriveTypeName, getDriveTypeClass, getDriveTypeIcon, getSeriesBindingText, getRecordGroupSummary, handleMenuSelect, saveConfig, searchTMDB, useDiscoverKeyword, subscribe, unsubscribeMedia, deleteRecord, openPanSou, manualSaveLink, checkLinkStatus, isTransferType, getCheckTagType, getCheckLabel, generate115QrCode, generateAliyunQrCode, refreshSeriesBindings, loadLogs, loadLogModules, resetLogFilters, getLogLevelTagType, runTaskManual, handlePageChange,
+            organizerConfig, organizerVariables, organizerSyntax, organizerPlan, organizerLoading, loadOrganizerConfig, saveOrganizerConfig, previewOrganizer, runOrganizer,
+            getMenuTitle, getDriveLabel, getDriveTagType, getMediaTypeLabel, getDriveTypeName, getDriveTypeClass, getDriveTypeIcon, getSeriesBindingText, getRecordGroupSummary, getRecordSectionSummary, handleMenuSelect, saveConfig, searchTMDB, useDiscoverKeyword, subscribe, unsubscribeMedia, deleteRecord, openPanSou, manualSaveLink, checkLinkStatus, isTransferType, getCheckTagType, getCheckLabel, generate115QrCode, generateAliyunQrCode, refreshSeriesBindings, manualBindSeriesDirectory, loadLogs, loadLogModules, resetLogFilters, getLogLevelTagType, runTaskManual, handlePageChange,
             autoRefreshLogs, toggleLogPoll, logModuleFilter, logLevelFilter, logModules, logLevelOptions, logStats,
             ...strmModule
         };

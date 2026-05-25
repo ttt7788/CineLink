@@ -1,22 +1,38 @@
-# CineLink fnOS native FPK packaging
+# CineLink 飞牛原生版 FPK
 
-This package builds a native fnOS application that runs CineLink without Docker.
+该目录用于构建 CineLink 飞牛原生应用包。原生版不依赖 Docker，包内包含：
 
-The native FPK contains:
+- CineLink 应用源码
+- Linux x86_64 Python 运行时
+- `requirements.txt` 中声明的 Python 依赖
+- Linux x86_64 AList 二进制
+- 飞牛应用安装、配置、启动、停止脚本
 
-- CineLink source code
-- A portable Linux x86_64 Python runtime
-- Python dependencies from `requirements.txt`
-- The Linux x86_64 AList binary
-- fnOS lifecycle scripts for start, stop, and status
+## 默认目录
 
-Build in GitHub Actions:
+```text
+配置与数据库：/vol1/@appdata/cinelinknative/config
+STRM 输出：/vol1/@appdata/cinelinknative/media
+Web 端口：8000
+播放公开地址：http://127.0.0.1:8000
+内置 AList：http://127.0.0.1:5244
+```
+
+安装时可在飞牛配置界面修改目录、端口和播放公开地址。若播放器从局域网其他设备访问，请把播放公开地址改为飞牛设备 IP。
+
+## 在线构建
+
+GitHub Actions 工作流：
 
 ```text
 .github/workflows/fnos-native-fpk.yml
 ```
 
-Manual build on Linux x86_64:
+推送 `v*` 标签或手动运行工作流后，会生成 `cinelinknative.fpk`。
+
+## 本地构建
+
+Linux x86_64 环境可执行：
 
 ```bash
 bash fnos-native/scripts/assemble-native.sh
@@ -25,12 +41,8 @@ chmod +x /tmp/fnpack
 /tmp/fnpack build --directory dist/fnos-native/cinelink
 ```
 
-Default install paths:
+## 版权声明
 
-- Config and database: `/vol1/@appdata/cinelinknative/config`
-- STRM output: `/vol1/@appdata/cinelinknative/media`
-- Web port: `8000`
-- Playback public URL: `http://127.0.0.1:8000`
+Copyright (c) 2026 ttt7788.
 
-The package is intended for fnOS x86_64. ARM builds need a separate Python
-runtime and AList binary.
+CineLink 云幕智链项目代码全程由 Codex 编写。第三方组件和外部服务遵循其各自许可协议、服务条款和版权声明。

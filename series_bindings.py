@@ -10,6 +10,10 @@ from logger import add_log
 VIDEO_EXTS = (".mp4", ".mkv", ".avi", ".mov", ".flv", ".wmv", ".ts", ".m2ts", ".rmvb", ".webm", ".iso")
 
 
+class SeriesBindingUnavailable(RuntimeError):
+    """The bound cloud folder is missing or cannot be scanned."""
+
+
 def normalize_drive_type(drive_type):
     value = (drive_type or "115").lower()
     if value in {"115", "cloud115"}:
@@ -114,6 +118,43 @@ def safe_folder_name(title):
     return re.sub(r"\s+", " ", value)[:80] or "未命名剧集"
 
 
+def is_binding_read_error(message):
+    text = str(message or "").lower()
+    if not text:
+        return False
+    auth_markers = ("cookie", "token", "access token", "unauthorized", "forbidden", "未配置", "授权", "登录")
+    if any(marker.lower() in text for marker in auth_markers):
+        return False
+    missing_markers = (
+        "code=404",
+        "code=405",
+        "http 404",
+        "http 405",
+        "not found",
+        "cannot be found",
+        "no such file",
+        "not exist",
+        "目录不存在",
+        "目录读取失败",
+        "文件夹不存在",
+        "parent_id",
+        "file_id cannot be found",
+    )
+    return any(marker in text for marker in missing_markers)
+
+
+def unbind_series_folder(binding_id, title, reason):
+    conn = get_db()
+    conn.execute("DELETE FROM series_bindings WHERE id=?", (binding_id,))
+    conn.commit()
+    conn.close()
+    add_log(
+        "WARNING",
+        f"【剧集追更】《{title or '未命名剧集'}》绑定目录不可用，已自动解除绑定，请重新绑定追剧目录。原因: {reason}",
+        module="series",
+    )
+
+
 async def list_drive_files(drive_type, parent_id, config=None):
     config = config or get_sys_config()
     drive_type = normalize_drive_type(drive_type)
@@ -196,6 +237,9 @@ async def find_series_folder(drive_type, title, parent_id, config=None):
 
 async def scan_series_folder(drive_type, parent_id, max_depth=4, config=None):
     drive_type = normalize_drive_type(drive_type)
+    parent_id = str(parent_id or "").strip()
+    if not parent_id:
+        raise SeriesBindingUnavailable("未绑定追剧目录")
     seen = set()
     latest_name = ""
     latest_time = ""
@@ -207,7 +251,10 @@ async def scan_series_folder(drive_type, parent_id, max_depth=4, config=None):
         seen.add(folder_id)
         items, msg = await list_drive_files(drive_type, folder_id, config)
         if msg != "success":
-            raise RuntimeError(msg or f"{drive_type} 目录读取失败: parent_id={folder_id}")
+            message = msg or f"{drive_type} 目录读取失败: parent_id={folder_id}"
+            if is_binding_read_error(message):
+                raise SeriesBindingUnavailable(message)
+            raise RuntimeError(message)
         count = 0
         for item in items:
             name = item_name(drive_type, item)
@@ -286,6 +333,67 @@ async def bind_series_after_transfer(tmdb_id, media_type, title, drive_type, sou
     return True
 
 
+async def bind_series_manual(tmdb_id, title, drive_type, cloud_parent_id, cloud_path=""):
+    drive_type = normalize_drive_type(drive_type)
+    cloud_parent_id = str(cloud_parent_id or "").strip()
+    if not cloud_parent_id:
+        return False, "请填写追剧目录 ID", None
+
+    config = get_sys_config()
+    episode_count, latest_name, latest_time = await scan_series_folder(
+        drive_type,
+        cloud_parent_id,
+        config=config,
+    )
+    now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    display_path = (cloud_path or "").strip() or f"{mount_root(drive_type)}/{cloud_parent_id}".replace("//", "/")
+    conn = get_db()
+    conn.execute(
+        """
+        INSERT INTO series_bindings
+            (tmdb_id, drive_type, title, cloud_parent_id, cloud_path,
+             latest_episode_count, latest_item_name, latest_item_updated_at, last_checked_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(tmdb_id, drive_type) DO UPDATE SET
+            title=excluded.title,
+            cloud_parent_id=excluded.cloud_parent_id,
+            cloud_path=excluded.cloud_path,
+            latest_episode_count=excluded.latest_episode_count,
+            latest_item_name=excluded.latest_item_name,
+            latest_item_updated_at=excluded.latest_item_updated_at,
+            last_checked_at=excluded.last_checked_at,
+            updated_at=excluded.updated_at
+        """,
+        (
+            tmdb_id,
+            drive_type,
+            title,
+            cloud_parent_id,
+            display_path,
+            episode_count,
+            latest_name,
+            latest_time,
+            now,
+            now,
+        ),
+    )
+    conn.commit()
+    conn.close()
+    add_log(
+        "SUCCESS",
+        f"【剧集绑定】《{title}》已手动绑定 {drive_type}:{display_path}，当前识别 {episode_count} 个视频文件。",
+        module="series",
+    )
+    return True, "绑定成功", {
+        "cloud_parent_id": cloud_parent_id,
+        "cloud_path": display_path,
+        "latest_episode_count": episode_count,
+        "latest_item_name": latest_name,
+        "latest_item_updated_at": latest_time,
+        "last_checked_at": now,
+    }
+
+
 def is_root_binding(row):
     drive_type = normalize_drive_type(row["drive_type"])
     root_id = "root" if drive_type == "aliyun" else "0"
@@ -344,11 +452,13 @@ async def refresh_series_bindings():
             conn.commit()
             conn.close()
             if count > old_count:
-                add_log("SUCCESS", f"【剧集追更】《{title}》发现更新：{old_count} -> {count}，最新：{latest_name or '未知'}")
+                add_log("SUCCESS", f"【剧集追更】《{title}》发现更新：{old_count} -> {count}，最新：{latest_name or '未知'}", module="series")
             else:
-                add_log("INFO", f"【剧集追更】《{title}》暂无新增，当前 {count} 个视频文件。")
+                add_log("INFO", f"【剧集追更】《{title}》暂无新增，当前 {count} 个视频文件。", module="series")
+        except SeriesBindingUnavailable as exc:
+            unbind_series_folder(row["id"], title, str(exc) or "目录不可用")
         except Exception as exc:
-            add_log("ERROR", f"【剧集追更】《{title}》扫描失败: {exc or '未知错误'}")
+            add_log("ERROR", f"【剧集追更】《{title}》扫描失败: {exc or '未知错误'}", module="series")
 
 
 async def rebuild_success_series_bindings(only_missing=True):

@@ -19,4 +19,4 @@ desktop_applaunchname=cinelink.main
 service_port=8000
 checkport=true
 
-changelog=2.2.0：修复 PanSou 搜索参数兼容，新增飞牛 FPK 打包工程，并优化安装目录配置。
+changelog=2.2.0：完善 Docker 镜像运行、飞牛应用配置、PanSou 搜索兼容和安装目录设置。

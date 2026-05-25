@@ -11,16 +11,60 @@ import qrcode.image.svg
 from fastapi import APIRouter, HTTPException
 from database import get_db, get_sys_config
 from config_guard import get_drive_config_status, require_drive_ready
-from models import ConfigModel, SubscribeModel, BatchSubscribeModel, BatchDeleteModel, SaveLinkModel, LinkCheckModel, LinkCheckBatchModel, TransferDownloadTaskModel, DriveListReq, DriveActionReq, QrcodeStatusModel, QrcodeLoginModel, AliyunQrcodeStatusModel, AliyunQrcodeLoginModel
+from models import ConfigModel, SubscribeModel, BatchSubscribeModel, BatchDeleteModel, ManualSeriesBindModel, SaveLinkModel, LinkCheckModel, LinkCheckBatchModel, TransferDownloadTaskModel, DriveListReq, DriveActionReq, QrcodeStatusModel, QrcodeLoginModel, AliyunQrcodeStatusModel, AliyunQrcodeLoginModel
 from logger import get_logs, get_log_modules, add_log
 from drive_api import Drive115, QuarkDrive, Drive123Open
 from aliyun_drive_mobile import AliyunDrive
 from pancheck_client import check_link_validity, infer_pancheck_platform
 from pansou_client import search_pansou
 from p115_runtime import ensure_p115_runtime_home
-from series_bindings import bind_series_after_transfer, ensure_series_target_folder, rebuild_success_series_bindings
+from series_bindings import bind_series_after_transfer, bind_series_manual, ensure_series_target_folder, rebuild_success_series_bindings
+from drive_organizer import get_organizer_config, save_organizer_config, preview_organize, run_organize, maybe_run_post_transfer_organize
 
 router = APIRouter()
+DEFAULT_CRON_EXPRESSION = "0 10,22 * * *"
+
+
+def _is_valid_cron_number_field(value, minimum, maximum):
+    parts = str(value or "").split(",")
+    if not parts:
+        return False
+    for part in parts:
+        part = part.strip()
+        if not part:
+            return False
+        if part == "*":
+            continue
+        if part.startswith("*/"):
+            step = part[2:]
+            if not step.isdigit() or int(step) <= 0:
+                return False
+            continue
+        if not part.isdigit():
+            return False
+        number = int(part)
+        if number < minimum or number > maximum:
+            return False
+    return True
+
+
+def _normalize_cron_expression(expr):
+    expr = str(expr or "").strip()
+    fields = expr.split()
+    if len(fields) != 5:
+        return DEFAULT_CRON_EXPRESSION
+    minute_field, hour_field, day_field, month_field, week_field = fields
+    if not _is_valid_cron_number_field(minute_field, 0, 59):
+        return DEFAULT_CRON_EXPRESSION
+    if not _is_valid_cron_number_field(hour_field, 0, 23):
+        return DEFAULT_CRON_EXPRESSION
+    if day_field != "*" and not _is_valid_cron_number_field(day_field, 1, 31):
+        return DEFAULT_CRON_EXPRESSION
+    if month_field != "*" and not _is_valid_cron_number_field(month_field, 1, 12):
+        return DEFAULT_CRON_EXPRESSION
+    if week_field != "*" and not _is_valid_cron_number_field(week_field, 0, 7):
+        return DEFAULT_CRON_EXPRESSION
+    return expr
 
 UPSERT_MEDIA_SQL = '''
     INSERT INTO media_items (tmdb_id, media_type, title, overview, poster_path, add_date)
@@ -48,22 +92,25 @@ def get_drive_status():
 def update_config(config: ConfigModel):
     conn = get_db()
     try:
+        cron_expression = _normalize_cron_expression(config.cron_expression)
         fields = [
             ('api_domain', config.api_domain), ('image_domain', config.image_domain), 
             ('api_key', config.api_key), ('pansou_domain', config.pansou_domain),
             ('pancheck_domain', config.pancheck_domain), ('pancheck_enabled', config.pancheck_enabled),
-            ('cron_expression', config.cron_expression), ('cms_api_url', config.cms_api_url), 
+            ('cron_expression', cron_expression), ('cms_api_url', config.cms_api_url),
             ('cms_api_token', config.cms_api_token), ('cookie_quark', config.cookie_quark), 
             ('token_aliyun', config.token_aliyun), ('drive115_save_dir', config.drive115_save_dir),
             ('drive123_client_id', config.drive123_client_id), ('drive123_client_secret', config.drive123_client_secret),
             ('quark_save_dir', config.quark_save_dir), 
             ('aliyun_save_dir', config.aliyun_save_dir), ('drive123_save_dir', config.drive123_save_dir), ('auto_subscribe_new', config.auto_subscribe_new),
             ('auto_subscribe_drive', config.auto_subscribe_drive),
-            ('magnet_download_drive', config.magnet_download_drive), ('ed2k_download_drive', config.ed2k_download_drive)
+            ('magnet_download_drive', config.magnet_download_drive), ('ed2k_download_drive', config.ed2k_download_drive),
+            ('pipeline_auto_organize', config.pipeline_auto_organize),
+            ('pipeline_organize_max_items', config.pipeline_organize_max_items)
         ]
         for key, value in fields: conn.execute("REPLACE INTO system_configs (config_key, config_value) VALUES (?, ?)", (key, value))
         conn.commit()
-        return {"message": "配置保存成功"}
+        return {"message": "配置保存成功", "data": {"cron_expression": cron_expression}}
     finally: conn.close()
 
 @router.get("/api/sync")
@@ -92,13 +139,19 @@ async def get_local_media(type: str = 'hot', page: int = 1, size: int = 30):
     if type == 'hot':
         c_q_today = "SELECT COUNT(*) FROM media_items WHERE is_trending = 1 AND trend_date = ?"
         today_count = conn.execute(c_q_today, (today_str,)).fetchone()[0]
+        config = get_sys_config()
+        from scheduler import TMDB_TRENDING_EXPECTED_MAX, TMDB_TRENDING_VERSION
+        trending_needs_refresh = (
+            today_count == 0
+            or today_count > TMDB_TRENDING_EXPECTED_MAX
+            or config.get('last_trending_sync_version') != TMDB_TRENDING_VERSION
+        )
 
-        if today_count == 0:
+        if trending_needs_refresh:
             conn.close()
-            config = get_sys_config()
             if config.get('api_key'):
                 from scheduler import sync_tmdb_data
-                add_log("INFO", "🚀 首次访问触发：今日热门数据为空，立刻极速同步 (前10页)...")
+                add_log("INFO", "【今日热门】当天热门快照为空或仍为旧版多页数据，立即刷新为当天核心热门。")
                 await sync_tmdb_data(force=True, mode="trending")
             conn = get_db()
 
@@ -242,6 +295,34 @@ async def rebuild_series_bindings_api():
     asyncio.create_task(run_job())
     return {"code": 202, "message": "已开始后台刷新未绑定剧集，请稍后查看转存记录或运行日志。"}
 
+@router.post("/api/series_bindings/manual")
+async def manual_series_bind_api(req: ManualSeriesBindModel):
+    conn = get_db()
+    media = conn.execute(
+        "SELECT title, media_type FROM media_items WHERE tmdb_id=?",
+        (req.tmdb_id,),
+    ).fetchone()
+    conn.close()
+    if media and media["media_type"] != "tv":
+        raise HTTPException(status_code=400, detail="电影无需绑定追剧目录")
+    title = (req.title or "").strip() or (media["title"] if media else "") or f"TMDB {req.tmdb_id}"
+    try:
+        ok, msg, data = await bind_series_manual(
+            req.tmdb_id,
+            title,
+            req.drive_type,
+            req.cloud_parent_id,
+            req.cloud_path,
+        )
+        if not ok:
+            raise HTTPException(status_code=400, detail=msg)
+        return {"code": 200, "message": msg, "data": data}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        add_log("WARNING", f"【剧集绑定】《{title}》手动绑定失败: {exc}", module="series")
+        raise HTTPException(status_code=400, detail=f"绑定失败: {exc}")
+
 @router.get("/api/pansou_search")
 async def search_ps(kw: str):
     c = get_sys_config()
@@ -377,6 +458,7 @@ async def api_save_link(req: SaveLinkModel):
                 parent_id,
                 cloud_path,
             )
+            await maybe_run_post_transfer_organize(drive_type, parent_id, req.title, req.media_type, config)
             add_log("SUCCESS", f"【手动转存】{req.title} 转存成功，目标:{drive_type}")
             return {"code": 200, "message": "转存成功！"}
         add_log("ERROR", f"【手动转存】{req.title} 转存失败: {msg}")
@@ -531,6 +613,7 @@ async def _run_transfer_download_task(task_id):
         if success:
             _set_transfer_task_status(task_id, "success", msg)
             add_log("SUCCESS", f"【转存下载】《{title}》完成：{msg}")
+            await maybe_run_post_transfer_organize(drive_type, save_dir, title, "", config)
         else:
             _set_transfer_task_status(task_id, "failed", msg)
             add_log("ERROR", f"【转存下载】《{title}》失败：{msg}")
@@ -680,6 +763,32 @@ async def api_drive_action(req: DriveActionReq):
     except Exception as e: return {"code": 500, "msg": str(e)}
 
 # ==================== 115 扫码登录接口：带有最强抗风控头信息 ====================
+@router.get("/api/drive_organizer/config")
+def api_drive_organizer_config():
+    return {"code": 200, "data": get_organizer_config()}
+
+@router.post("/api/drive_organizer/config")
+def api_save_drive_organizer_config(req: dict):
+    return {"code": 200, "data": save_organizer_config(req or {}), "message": "网盘整理配置已保存"}
+
+@router.post("/api/drive_organizer/preview")
+async def api_preview_drive_organizer(req: dict):
+    try:
+        result = await preview_organize(req or {})
+        return {"code": 200, "data": result}
+    except Exception as e:
+        add_log("ERROR", f"【网盘整理】预览失败: {e}", module="drive")
+        return {"code": 500, "message": str(e)}
+
+@router.post("/api/drive_organizer/run")
+async def api_run_drive_organizer(req: dict):
+    try:
+        result = await run_organize(req or {})
+        return {"code": 200, "data": result}
+    except Exception as e:
+        add_log("ERROR", f"【网盘整理】执行失败: {e}", module="drive")
+        return {"code": 500, "message": str(e)}
+
 HEADERS_115 = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
     "Accept": "application/json, text/plain, */*"
